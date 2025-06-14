@@ -3,16 +3,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const AWS = require('aws-sdk');
+const { PollyClient, SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
 const fileDuration = require('../helpers/file-duration');
-const voiceInfo = require('../helpers/get-voice-id');
 const settings = require('../../settings');
 const logger = require('sonos-discovery/lib/helpers/logger');
 
 const DEFAULT_SETTINGS = {
   OutputFormat: 'mp3',
   VoiceId: 'Joanna',
-  TextType: 'text'
+  TextType: 'text',
+  Engine: 'neural'
 };
 
 function polly(phrase, voiceName) {
@@ -27,27 +27,13 @@ function polly(phrase, voiceName) {
   if (settings.aws.name) {
     synthesizeParameters.VoiceId = settings.aws.name;
   }
-  if (voiceInfo.getVoiceName(voiceName)) {
-    synthesizeParameters.VoiceId = voiceInfo.getVoiceName(voiceName);
+  if (voiceName) {
+    synthesizeParameters.VoiceId = voiceName;
   }
-  if (voiceInfo.getVoiceEngine(voiceName)){
-    synthesizeParameters.Engine = voiceInfo.getVoiceEngine(voiceName).toLowerCase();
-  } else {
-    synthesizeParameters.Engine = 'neural';
+  if (phrase.startsWith('<speak>') && phrase.endsWith('</speak>')) {
+    synthesizeParameters.TextType = 'ssml';
   }
-  // if (synthesizeParameters.VoiceId.endsWith('Neural')) {
-  //   synthesizeParameters.Engine = 'neural';
-  //   synthesizeParameters.VoiceId = synthesizeParameters.VoiceId.slice(0, -6);
-  // }
-  // if (synthesizeParameters.VoiceId.endsWith('Generative')) {
-  //   synthesizeParameters.Engine = 'generative';
-  //   synthesizeParameters.VoiceId = synthesizeParameters.VoiceId.slice(0, -10);
-  // }
-  // if (phrase.startsWith('<speak>') && phrase.endsWith('</speak>')) {
-  //   synthesizeParameters.TextType = 'ssml';
-  //   synthesizeParameters.Engine = 'neural';
-  // }
-
+  
   const phraseHash = crypto.createHash('sha1').update(phrase).digest('hex');
   const filename = `polly-${phraseHash}-${synthesizeParameters.VoiceId}-${synthesizeParameters.Engine}.mp3`;
   const filepath = path.resolve(settings.webroot, 'tts', filename);
@@ -66,14 +52,26 @@ function polly(phrase, voiceName) {
     logger.info(`announce file for phrase "${phrase}" does not seem to exist, downloading`);
   }
 
-  const constructorParameters = Object.assign({ apiVersion: '2016-06-10' }, settings.aws.credentials);
+  function saveStream(fromStream, filename) {
+    return new Promise((resolve, reject) => {
+      let toStream = fs.createWriteStream(filename);
+      toStream.on('finish', resolve);
+      toStream.on('error', reject);
+      fromStream.pipe(toStream);
+    })
+  }
 
-  const polly = new AWS.Polly(constructorParameters);
+  const constructorParameters = Object.assign({ region: 'us-east-1' });
 
-  return polly.synthesizeSpeech(synthesizeParameters)
-    .promise()
+  const polly = new PollyClient(constructorParameters);
+  
+  return polly
+    .send(new SynthesizeSpeechCommand(synthesizeParameters))
     .then((data) => {
-      fs.writeFileSync(filepath, data.AudioStream);
+      if (!data || !data.AudioStream) throw Error(`bad response`);
+      return saveStream(data.AudioStream, filepath);
+    })
+    .then(() => {
       return fileDuration(filepath);
     })
     .then((duration) => {
@@ -81,7 +79,12 @@ function polly(phrase, voiceName) {
         duration,
         uri: expectedUri
       };
+    })
+    .catch((error) => {
+      console.error(error);
     });
 }
 
-module.exports = polly;
+let foor = polly('<speak>this is a newscddast</speak>')
+console.log(foor+ ' and ' + foor.uri)
+//module.exports = polly;
