@@ -1,0 +1,17 @@
+{
+  "players": [
+    {
+      "roomName": "1. Family Room",
+      "volume": 60
+    },
+    {
+      "roomName": "1. Kitchen",
+      "volume": 60
+    },
+    {
+      "roomName": "0. Ruff Playroom",
+      "volume": 60
+    }
+  ],
+  "pauseOthers": false,
+}

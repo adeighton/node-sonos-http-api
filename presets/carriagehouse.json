@@ -1,0 +1,9 @@
+{
+  "players": [
+    {
+      "roomName": "2. Carriage House",
+      "volume": 20
+    }
+  ],
+  "pauseOthers": false,
+}

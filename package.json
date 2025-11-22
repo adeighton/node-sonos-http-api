@@ -12,28 +12,28 @@
     "url": "https://github.com/jishi/node-sonos-http-api.git"
   },
   "dependencies": {
-    "anesidora": "^1.2.0",
-    "aws-sdk": "^2.1299.0",
-    "basic-auth": "~1.1.0",
-    "fuse.js": "^6.4.1",
-    "html-entities": "^1.2.1",
-    "json5": "^0.5.1",
-    "mime": "^1.4.1",
-    "music-metadata": "^1.1.0",
-    "serve-static": "^1.15.0",
-    "request-promise": "~1.0.2",
-    "sonos-discovery": "https://github.com/jishi/node-sonos-discovery/archive/v1.8.0.tar.gz",
+    "@aws-sdk/client-polly": "^3.600.0",
+    "basic-auth": "^2.0.1",
+    "fuse.js": "^7.0.0",
+    "html-entities": "^2.3.0",
+    "json5": "^2.2.0",
+    "mime": "^4.0.0",
+    "music-metadata": "^8.0.0",
+    "serve-static": "^1.16.0",
+    "axios": "^1.7.0",
+    "request-promise": "^4.2.6",
+    "sonos-discovery": "file:./lib/sonos-discovery",
     "wav-file-info": "0.0.8",
     "elevenlabs-node": "2.0.1"
   },
   "engines": {
-    "node": ">=4 <23"
+    "node": ">=4"
   },
   "main": "lib/sonos-http-api.js",
   "license": "MIT",
   "devDependencies": {
-    "eslint": "^4.8.0",
-    "eslint-config-airbnb-base": "^12.0.1",
-    "eslint-plugin-import": "^2.7.0"
+    "eslint": "^8.0.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.29.0"
   }
 }

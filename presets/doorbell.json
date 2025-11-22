@@ -1,0 +1,39 @@
+{
+  "players": [
+    {
+      "roomName": "0. Craft Room",
+      "volume": 60
+    },
+    {
+      "roomName": "0. Exercise Room",
+      "volume": 60
+    },
+    {
+      "roomName": "1. Family Room",
+      "volume": 60
+    },
+    {
+      "roomName": "1. Kitchen",
+      "volume": 60
+    },
+    {
+      "roomName": "1. Library",
+      "volume": 60
+    }
+  ],
+  "players-halloween": [
+  	{
+      "roomName": "1. Dining Room",
+      "volume": 60
+    },
+    {
+      "roomName": "2. Twins Room",
+      "volume": 99
+    },
+    {
+      "roomName": "1. Library",
+      "volume": 60
+    }
+  ],
+  "pauseOthers": false,
+}

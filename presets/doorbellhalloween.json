@@ -1,0 +1,17 @@
+{
+  "players": [
+    {
+      "roomName": "1. Dining Room",
+      "volume": 60
+    },
+    {
+      "roomName": "1. Living Room",
+      "volume": 60
+    },
+    {
+      "roomName": "Outdoor Sonos Move",
+      "volume": 99
+    }
+  ],
+  "pauseOthers": true,
+}

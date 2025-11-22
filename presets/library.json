@@ -1,0 +1,9 @@
+{
+  "players": [
+    {
+      "roomName": "1. Library",
+      "volume": 80
+    }
+  ],
+  "pauseOthers": true,
+}
