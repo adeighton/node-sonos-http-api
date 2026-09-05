@@ -17,6 +17,19 @@ export function isRadioOrLineIn(uri: string): boolean {
   return RADIO_OR_LINE_IN_PREFIXES.some((prefix) => uri.startsWith(prefix));
 }
 
+/** A player following another player's group (`x-rincon:<uuid>`) cannot seek either. */
+export function isGroupLink(uri: string): boolean {
+  return uri.startsWith('x-rincon:');
+}
+
+/**
+ * Whether a queue position is worth restoring: not for streams or group links, and not when the
+ * queue was empty (Sonos reports track 0), since seeking there only fails.
+ */
+export function hasQueuePosition(uri: string, trackNo: number): boolean {
+  return !isRadioOrLineIn(uri) && !isGroupLink(uri) && trackNo > 0;
+}
+
 /** Everything needed to put a player (or group) back the way it was. */
 export interface Backup {
   preset: Preset;
@@ -39,7 +52,7 @@ function transportBackup(coordinator: Player): Partial<Preset> {
     metadata: coordinator.avTransportUriMetadata,
     playMode: { repeat: state.playMode.repeat },
   };
-  if (!isRadioOrLineIn(coordinator.avTransportUri)) {
+  if (hasQueuePosition(coordinator.avTransportUri, state.trackNo)) {
     preset.trackNo = state.trackNo;
     preset.elapsedTime = state.elapsedTime;
   }

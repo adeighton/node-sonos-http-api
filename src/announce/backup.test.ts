@@ -6,6 +6,8 @@ import { createTestPlayer } from '../testing/test-player.ts';
 import {
   captureAllBackups,
   capturePlayerBackup,
+  hasQueuePosition,
+  isGroupLink,
   isRadioOrLineIn,
   restorePreset,
 } from './backup.ts';
@@ -37,6 +39,17 @@ describe('isRadioOrLineIn', () => {
   });
 });
 
+describe('hasQueuePosition', () => {
+  it('is only true for a queue with a current track', () => {
+    assert.equal(hasQueuePosition('x-rincon-queue:RINCON_1#0', 3), true);
+    assert.equal(hasQueuePosition('x-rincon-queue:RINCON_1#0', 0), false, 'empty queue');
+    assert.equal(hasQueuePosition('x-rincon:RINCON_1', 1), false, 'group link');
+    assert.equal(hasQueuePosition('x-sonosapi-stream:s1', 1), false, 'stream');
+    assert.equal(isGroupLink('x-rincon:RINCON_1'), true);
+    assert.equal(isGroupLink('x-rincon-queue:RINCON_1#0'), false);
+  });
+});
+
 describe('capturePlayerBackup', () => {
   it('backs up a standalone player with its playback position', async () => {
     const system = new FakeSystem();
@@ -56,6 +69,36 @@ describe('capturePlayerBackup', () => {
         elapsedTime: 0,
       },
     });
+  });
+
+  it('omits the position for a stopped player with an empty queue', async () => {
+    const system = new FakeSystem();
+    const { player } = createTestPlayer({ system, roomName: 'Kitchen', uuid: 'RINCON_K' });
+    await player.handleLastChange({
+      transportstate: { val: 'STOPPED' },
+      currenttrack: { val: '0' },
+      avtransporturi: { val: 'x-rincon-queue:RINCON_K#0' },
+    });
+    system.addStandalone(player);
+
+    const backup = capturePlayerBackup(system, player);
+
+    assert.equal(backup.preset.state, 'STOPPED');
+    assert.equal('trackNo' in backup.preset, false);
+    assert.equal('elapsedTime' in backup.preset, false);
+  });
+
+  it('omits the position when the topology still shows a rejoining player as standalone', async () => {
+    // Right after an announcement the player has been told to follow its old group again, but
+    // the topology event has not arrived yet: it looks standalone with an x-rincon: transport.
+    const system = new FakeSystem();
+    const player = await playing(system, 'Kitchen', 'RINCON_K', 30, 'x-rincon:RINCON_F');
+    system.addStandalone(player);
+
+    const backup = capturePlayerBackup(system, player);
+
+    assert.equal(backup.preset.uri, 'x-rincon:RINCON_F');
+    assert.equal('trackNo' in backup.preset, false);
   });
 
   it('omits the position for radio and remembers the coordinator for members', async () => {
