@@ -1,34 +1,19 @@
 {
   "name": "sonos-discovery",
   "version": "1.8.0",
-  "description": "A simple node library for managing your Sonos system",
+  "description": "Vendored copy of jishi/node-sonos-discovery v1.8.0 (plus local fixes). Being ported to src/discovery; this package goes away when that port is complete.",
   "author": "Jimmy Shimizu <jimmy@shimizu.se>",
+  "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/jishi/node-sonos-discovery.git"
   },
   "dependencies": {
     "html-entities": "1.0.x",
-    "xml-flow": "1.0.2"
-  },
-  "devDependencies": {
-    "chai": "*",
-    "jscs": "^3.0.7",
-    "jshint": "~2.8.0",
-    "mocha": "^4.0.1",
-    "proxyquire": "^1.7.3",
-    "rewire": "^2.5.1",
-    "sinon": "^1.17.2",
-    "sinon-as-promised": "^4.0.0",
-    "sinon-chai": "^2.8.0"
+    "xml-flow": "^1.0.4"
   },
   "engines": {
-    "node": ">=4"
+    "node": ">=24"
   },
-  "main": "lib/SonosSystem.js",
-  "scripts": {
-    "jscs": "jscs lib test",
-    "mocha": "mocha test/unit --recursive",
-    "test": "npm run -s jscs && npm run -s mocha"
-  }
+  "main": "lib/SonosSystem.js"
 }

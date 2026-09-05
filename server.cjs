@@ -7,7 +7,7 @@ const SonosSystem = require('sonos-discovery');
 const logger = require('sonos-discovery/lib/helpers/logger');
 const SonosHttpAPI = require('./lib/sonos-http-api.js');
 const serveStatic = require('serve-static');
-const settings = require('./settings');
+const settings = require('./settings.cjs');
 
 const serve = new serveStatic(settings.webroot);
 const discovery = new SonosSystem(settings);
