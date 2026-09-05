@@ -249,9 +249,7 @@ export class SonosSystem
       return;
     }
 
-    const delay = this.#restartCount === 0 ? 0 : SEED_RETRY_MS;
-    this.#restartCount += 1;
-    this.#seedTimer = setTimeout(() => {
+    const seed = (): void => {
       this.#seedTimer = undefined;
       for (const host of hosts) {
         void this.#init(
@@ -263,7 +261,16 @@ export class SonosSystem
           true,
         );
       }
-    }, delay);
+    };
+
+    // The first attempt runs right away; later ones (after a failure) are spaced out.
+    const firstAttempt = this.#restartCount === 0;
+    this.#restartCount += 1;
+    if (firstAttempt) {
+      seed();
+    } else {
+      this.#seedTimer = setTimeout(seed, SEED_RETRY_MS);
+    }
   }
 
   async #teardown(): Promise<void> {
