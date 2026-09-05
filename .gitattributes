@@ -1,2 +1,14 @@
-# Set the default behavior, in case people don't have core.autocrlf set.
-* auto
+# Normalize all text files to LF in the repository and on checkout.
+* text=auto eol=lf
+
+# Binary assets: never touch line endings or diff as text.
+*.mp3 binary
+*.aiff binary
+*.wav binary
+*.m4a binary
+*.png binary
+*.gif binary
+*.jpg binary
+*.ico binary
+*.pfx binary
+*.tgz binary
