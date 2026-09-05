@@ -2,10 +2,11 @@
  * Entry point: loads settings, wires the discovery layer to the HTTP app and handles signals.
  * Everything it composes is unit-tested on its own; this file stays thin on purpose.
  */
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import pkg from '../package.json' with { type: 'json' };
 import { createActionRegistry } from './actions/index.ts';
+import { Announcer } from './announce/announce.ts';
 import { createApp } from './app.ts';
 import { ConfigError } from './config/errors.ts';
 import { ensureRuntimeDirectories, loadSettings } from './config/load.ts';
@@ -16,6 +17,8 @@ import { createWebhookNotifier } from './http/webhook.ts';
 import { createLogger } from './logger.ts';
 import { PresetStore } from './presets/store.ts';
 import { startServer } from './server.ts';
+import { createClipLibrary } from './tts/clips.ts';
+import { createTtsService } from './tts/index.ts';
 
 const SHUTDOWN_GRACE_MS = 5000;
 
@@ -61,6 +64,9 @@ async function main(): Promise<void> {
     settings,
     registry: createActionRegistry(),
     presets,
+    tts: createTtsService(settings, { logger }),
+    clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
+    announcer: new Announcer({ system, logger }),
     hub,
     logger,
     version: pkg.version,

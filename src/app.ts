@@ -5,7 +5,7 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { streamSSE } from 'hono/streaming';
 
-import type { ActionRegistry, ActionSystem } from './actions/registry.ts';
+import type { ActionRegistry, ActionSystem, AnnouncerLike } from './actions/registry.ts';
 import type { Settings } from './config/schema.ts';
 import { decodePathSegments, resolveRequest, runAction } from './http/dispatch.ts';
 import { errorBody, statusForError } from './http/errors.ts';
@@ -13,12 +13,17 @@ import type { EventHub } from './http/events.ts';
 import { renderIndexHtml } from './http/index-page.ts';
 import type { Logger } from './logger.ts';
 import type { PresetStore } from './presets/store.ts';
+import type { ClipLibrary } from './tts/clips.ts';
+import type { TtsService } from './tts/index.ts';
 
 export interface AppDeps {
   system: ActionSystem;
   settings: Settings;
   registry: ActionRegistry;
   presets: PresetStore;
+  tts: TtsService;
+  clips: ClipLibrary;
+  announcer: AnnouncerLike;
   hub: EventHub;
   logger: Logger;
   version: string;
@@ -94,6 +99,9 @@ export function createApp(deps: AppDeps): Hono {
         system: deps.system,
         settings,
         presets: deps.presets,
+        tts: deps.tts,
+        clips: deps.clips,
+        announcer: deps.announcer,
         logger,
         publicBaseUrl: deps.publicBaseUrl(),
         version: deps.version,

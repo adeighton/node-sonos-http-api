@@ -1,4 +1,5 @@
 import { registerBbcSoundsActions } from './bbc-sounds.ts';
+import { registerClipActions } from './clip.ts';
 import { registerEqualizerActions } from './equalizer.ts';
 import { registerFavoriteActions } from './favorites.ts';
 import { registerGroupingActions } from './grouping.ts';
@@ -11,6 +12,7 @@ import { registerPlaylistActions } from './playlists.ts';
 import { registerPlayModeActions } from './playmode.ts';
 import { registerPresetActions } from './presets.ts';
 import { registerQueueActions } from './queue.ts';
+import { registerSayActions } from './say.ts';
 import { ActionRegistry } from './registry.ts';
 import { registerSeekActions } from './seek.ts';
 import { registerSleepActions } from './sleep.ts';
@@ -42,6 +44,8 @@ export function createActionRegistry(): ActionRegistry {
   registerStateActions(registry);
   registerZoneActions(registry);
   registerPresetActions(registry);
+  registerSayActions(registry);
+  registerClipActions(registry);
   registerSystemActions(registry);
   registerPauseAllActions(registry);
   registerLockVolumeActions(registry);

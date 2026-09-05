@@ -3,8 +3,16 @@ import type { EventEmitter } from 'node:events';
 import type { Settings } from '../config/schema.ts';
 import type { Player, SonosSystemEvents, Zone } from '../discovery/player.ts';
 import type { AvailableService, BrowseItem, Preset } from '../discovery/types.ts';
+import type { Announcement, AnnounceTarget } from '../announce/announce.ts';
 import type { Logger } from '../logger.ts';
 import type { PresetStore } from '../presets/store.ts';
+import type { ClipLibrary } from '../tts/clips.ts';
+import type { TtsService } from '../tts/index.ts';
+
+/** Plays a clip on a target and restores the previous state afterwards (see announce/announce.ts). */
+export interface AnnouncerLike {
+  announce(target: AnnounceTarget, announcement: Announcement): Promise<void>;
+}
 
 /** What actions may use of the Sonos system (SonosSystem satisfies it; tests use a fake). */
 export interface ActionSystem extends Pick<EventEmitter<SonosSystemEvents>, 'on' | 'once' | 'off'> {
@@ -30,6 +38,9 @@ export interface ActionContext {
   system: ActionSystem;
   settings: Settings;
   presets: PresetStore;
+  tts: TtsService;
+  clips: ClipLibrary;
+  announcer: AnnouncerLike;
   logger: Logger;
   /** Where players can fetch clips from this server, e.g. `http://192.168.1.10:5005`. */
   publicBaseUrl: string;
