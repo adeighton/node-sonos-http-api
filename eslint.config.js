@@ -57,6 +57,15 @@ export default defineConfig([
         },
       ],
       '@typescript-eslint/consistent-type-imports': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
+      ],
       'no-console': 'error',
       eqeqeq: ['error', 'always'],
       // tsc owns module resolution (including .ts extensions).
