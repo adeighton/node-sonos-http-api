@@ -1,10 +1,15 @@
+import { HTTPException } from 'hono/http-exception';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+
 import { ArgumentError, UnknownServiceError } from '../discovery/errors.ts';
+
+export type HttpStatus = ContentfulStatusCode;
 
 /** An error that maps to a specific HTTP status code. */
 export class HttpError extends Error {
-  readonly status: number;
+  readonly status: HttpStatus;
 
-  constructor(status: number, message: string, options?: ErrorOptions) {
+  constructor(status: HttpStatus, message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'HttpError';
     this.status = status;
@@ -33,8 +38,12 @@ export class ServiceUnavailableError extends HttpError {
 }
 
 /** The status code a thrown value should produce. Input and lookup errors are the client's fault. */
-export function statusForError(error: unknown): number {
+export function statusForError(error: unknown): HttpStatus {
   if (error instanceof HttpError) {
+    return error.status;
+  }
+
+  if (error instanceof HTTPException) {
     return error.status;
   }
 

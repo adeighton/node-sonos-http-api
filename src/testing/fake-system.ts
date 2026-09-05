@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { mock } from 'node:test';
 
+import type { ActionSystem } from '../actions/registry.ts';
+import { UnknownServiceError } from '../discovery/errors.ts';
 import type { Player, PlayerSystem, SonosSystemEvents, Zone } from '../discovery/player.ts';
-import type { BrowseItem } from '../discovery/types.ts';
+import type { AvailableService, BrowseItem, Preset } from '../discovery/types.ts';
 
 export interface RecordedSystemEvent {
   event: keyof SonosSystemEvents;
@@ -10,18 +12,30 @@ export interface RecordedSystemEvent {
 }
 
 /**
- * A stand-in for SonosSystem from a Player's point of view: holds zones, records the events
- * players re-emit, and serves canned favorites / playlists.
+ * A stand-in for SonosSystem: holds zones and players, records the events emitted on it, serves
+ * canned favorites / playlists / services and records applied presets.
  */
-export class FakeSystem extends EventEmitter<SonosSystemEvents> implements PlayerSystem {
+export class FakeSystem
+  extends EventEmitter<SonosSystemEvents>
+  implements PlayerSystem, ActionSystem
+{
   zones: Zone[] = [];
   players: Player[] = [];
+  localEndpoint = '127.0.0.1';
+  availableServices: Record<string, AvailableService> = {};
   favorites: BrowseItem[] = [];
   playlists: BrowseItem[] = [];
+  readonly appliedPresets: Preset[] = [];
   readonly getFavorites = mock.fn((): Promise<BrowseItem[]> => Promise.resolve(this.favorites));
   readonly getPlaylists = mock.fn((): Promise<BrowseItem[]> => Promise.resolve(this.playlists));
+  readonly refreshShareIndex = mock.fn((): Promise<void> => Promise.resolve());
+  readonly applyPreset = mock.fn((preset: Preset): Promise<void> => {
+    this.appliedPresets.push(preset);
+    return Promise.resolve();
+  });
   /** Every event emitted on the system, in order. */
   readonly emitted: RecordedSystemEvent[] = [];
+  #anyPlayerIndex = 0;
 
   constructor() {
     super();
@@ -46,6 +60,26 @@ export class FakeSystem extends EventEmitter<SonosSystemEvents> implements Playe
     return this.players.find((player) => player.roomName.toLowerCase() === wanted);
   }
 
+  getPlayerByUUID(uuid: string): Player | undefined {
+    return this.players.find((player) => player.uuid === uuid);
+  }
+
+  getAnyPlayer(): Player | undefined {
+    if (this.players.length === 0) {
+      return undefined;
+    }
+
+    return this.players[this.#anyPlayerIndex++ % this.players.length];
+  }
+
+  getServiceId(serviceName: string): number {
+    return this.#requireService(serviceName).id;
+  }
+
+  getServiceType(serviceName: string): number {
+    return this.#requireService(serviceName).type;
+  }
+
   /** Registers `player` as the coordinator of its own single-member zone. */
   addStandalone(player: Player): Zone {
     const zone: Zone = {
@@ -58,6 +92,15 @@ export class FakeSystem extends EventEmitter<SonosSystemEvents> implements Playe
     this.zones.push(zone);
     this.players.push(player);
     return zone;
+  }
+
+  #requireService(serviceName: string): AvailableService {
+    const service = this.availableServices[serviceName];
+    if (!service) {
+      throw new UnknownServiceError(serviceName);
+    }
+
+    return service;
   }
 
   #record(event: keyof SonosSystemEvents, args: unknown[]): void {
