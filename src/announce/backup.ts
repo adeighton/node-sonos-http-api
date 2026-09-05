@@ -17,6 +17,15 @@ export function isRadioOrLineIn(uri: string): boolean {
   return RADIO_OR_LINE_IN_PREFIXES.some((prefix) => uri.startsWith(prefix));
 }
 
+/**
+ * Transports a player refuses to be set back to: nothing at all (an idle player after boot) and
+ * sessions pushed by another app, such as AirPlay, Spotify Connect or a voice assistant
+ * (`x-sonos-vli:`), which end when the announcement takes over.
+ */
+export function isRestorableUri(uri: string): boolean {
+  return uri !== '' && !uri.startsWith('x-sonos-vli:');
+}
+
 /** A player following another player's group (`x-rincon:<uuid>`) cannot seek either. */
 export function isGroupLink(uri: string): boolean {
   return uri.startsWith('x-rincon:');
@@ -46,6 +55,16 @@ function zoneOf(system: { zones: Zone[] }, player: Player): Zone | undefined {
 
 function transportBackup(coordinator: Player): Partial<Preset> {
   const state = coordinator.state;
+  if (!isRestorableUri(coordinator.avTransportUri)) {
+    // Leave the player idle on its own queue instead of on the announcement clip.
+    return {
+      state: 'STOPPED',
+      uri: `x-rincon-queue:${coordinator.uuid}#0`,
+      metadata: '',
+      playMode: { repeat: state.playMode.repeat },
+    };
+  }
+
   const preset: Partial<Preset> = {
     state: state.playbackState,
     uri: coordinator.avTransportUri,

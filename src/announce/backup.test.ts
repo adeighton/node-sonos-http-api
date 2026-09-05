@@ -9,6 +9,7 @@ import {
   hasQueuePosition,
   isGroupLink,
   isRadioOrLineIn,
+  isRestorableUri,
   restorePreset,
 } from './backup.ts';
 
@@ -36,6 +37,15 @@ describe('isRadioOrLineIn', () => {
     assert.equal(isRadioOrLineIn('x-sonosapi-stream:s1'), true);
     assert.equal(isRadioOrLineIn('x-rincon-stream:RINCON_1'), true);
     assert.equal(isRadioOrLineIn('x-rincon-queue:RINCON_1#0'), false);
+  });
+});
+
+describe('isRestorableUri', () => {
+  it('rejects an empty transport and app-pushed sessions', () => {
+    assert.equal(isRestorableUri(''), false);
+    assert.equal(isRestorableUri('x-sonos-vli:RINCON_1:2,airplay:abc'), false);
+    assert.equal(isRestorableUri('x-rincon-queue:RINCON_1#0'), true);
+    assert.equal(isRestorableUri('x-sonosapi-stream:s1'), true);
   });
 });
 
@@ -69,6 +79,40 @@ describe('capturePlayerBackup', () => {
         elapsedTime: 0,
       },
     });
+  });
+
+  it('falls back to the stopped queue when the player had no transport or an AirPlay session', async () => {
+    const system = new FakeSystem();
+    const idle = createTestPlayer({ system, roomName: 'Family Room', uuid: 'RINCON_F' }).player;
+    await idle.handleLastChange({
+      transportstate: { val: 'PLAYING' },
+      currenttrack: { val: '1' },
+      currentplaymode: { val: 'REPEAT_ALL' },
+    });
+    system.addStandalone(idle);
+    assert.equal(idle.avTransportUri, '');
+
+    const backup = capturePlayerBackup(system, idle);
+
+    assert.deepEqual(backup.preset, {
+      players: [{ roomName: 'Family Room', volume: 0 }],
+      state: 'STOPPED',
+      uri: 'x-rincon-queue:RINCON_F#0',
+      metadata: '',
+      playMode: { repeat: 'all' },
+    });
+
+    const airplay = await playing(
+      system,
+      'Den',
+      'RINCON_D',
+      20,
+      'x-sonos-vli:RINCON_D:2,airplay:x',
+    );
+    system.addStandalone(airplay);
+    const all = captureAllBackups(system).find((b) => b.preset.players[0]?.roomName === 'Den');
+    assert.equal(all?.preset.uri, 'x-rincon-queue:RINCON_D#0');
+    assert.equal(all?.preset.state, 'STOPPED');
   });
 
   it('omits the position for a stopped player with an empty queue', async () => {

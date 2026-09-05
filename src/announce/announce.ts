@@ -231,7 +231,12 @@ export class Announcer {
         await this.#system.applyPreset(preset);
       } catch (error) {
         this.#logger.warn(
-          { err: error, rooms: preset.players.map((p) => p.roomName) },
+          {
+            err: error,
+            rooms: preset.players.map((p) => p.roomName),
+            uri: preset.uri,
+            state: preset.state,
+          },
           'restore failed',
         );
       }

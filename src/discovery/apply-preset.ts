@@ -191,7 +191,7 @@ export async function applyPreset(
     await coordinator.replaceWithFavorite(preset.favorite);
   } else if (preset.playlist !== undefined) {
     await coordinator.replaceWithPlaylist(preset.playlist);
-  } else if (preset.uri !== undefined) {
+  } else if (preset.uri) {
     await coordinator.setAVTransport(preset.uri, preset.metadata);
   }
 

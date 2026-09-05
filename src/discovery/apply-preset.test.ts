@@ -223,6 +223,19 @@ describe('applyPreset', () => {
     assert.equal(player.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 0);
   });
 
+  it('never sends an empty uri to the player', async () => {
+    const player = fakePresetPlayer({ roomName: 'Bedroom', avTransportUri: '' });
+    const system: PresetSystem = {
+      getPlayer: () => player,
+      zones: [{ uuid: player.uuid, coordinator: player, members: [player] }],
+    };
+
+    await applyPreset(system, { players: [{ roomName: 'Bedroom' }], uri: '', state: 'STOPPED' });
+
+    assert.equal(player.setAVTransport.mock.callCount(), 0);
+    assert.equal(player.play.mock.callCount(), 0);
+  });
+
   it('uses the playlist when no favorite is given and leaves a stopped preset stopped', async () => {
     const { system, coordinator } = groupedSystem();
     const preset = fullPreset();
