@@ -58,15 +58,30 @@ fi
 echo "✅ .env is present"
 
 echo "📦 Syncing files..."
+# Explicit excludes rather than the .gitignore filter: with --delete, rsync's per-directory
+# .gitignore rules do not protect files on the Pi, and once deleted .env there. Everything that
+# lives only on the Pi (.env, installed packages, the library cache, generated TTS clips) is
+# both excluded from the transfer and protected from deletion.
+PI_ONLY=(.env node_modules cache static/tts)
+RSYNC_RULES=()
+for path in "${PI_ONLY[@]}"; do
+  RSYNC_RULES+=("--exclude=${path}" "--filter=P ${path}")
+done
 rsync -az --delete \
-  --include='settings.json' \
+  "${RSYNC_RULES[@]}" \
   --exclude='.git' \
   --exclude='.github' \
   --exclude='deploy.sh' \
   --exclude='coverage' \
-  --exclude='static/tts' \
-  --filter=':- .gitignore' \
+  --exclude='.DS_Store' \
+  --exclude='.idea' \
+  --exclude='.vscode' \
+  --exclude='*.log' \
   . "${REMOTE_HOST}:${REMOTE_DIR}"
+if ! remote "test -f ${REMOTE_DIR}.env"; then
+  echo "❌ The sync removed ${REMOTE_DIR}.env; restore it with: scp .env ${REMOTE_HOST}:${REMOTE_DIR}.env"
+  exit 1
+fi
 echo "✅ Files synced to ${REMOTE_HOST}:${REMOTE_DIR}"
 
 echo "📦 Installing production dependencies..."
