@@ -8,8 +8,3 @@ package-lock.json
 settings.json
 README.md
 LICENSE.md
-# Pre-modernization CommonJS code; deleted once the TypeScript port is complete.
-lib/
-server.cjs
-settings.cjs
-test_endpoint.js

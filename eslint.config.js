@@ -6,18 +6,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores([
-    'node_modules/',
-    'coverage/',
-    'static/',
-    'cache/',
-    'presets/',
-    // Pre-modernization CommonJS code; deleted once the TypeScript port is complete.
-    'lib/',
-    'server.cjs',
-    'settings.cjs',
-    'test_endpoint.js',
-  ]),
+  globalIgnores(['node_modules/', 'coverage/', 'static/', 'cache/', 'presets/']),
   {
     files: ['**/*.ts'],
     extends: [

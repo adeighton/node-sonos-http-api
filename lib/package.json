@@ -1,6 +1,0 @@
-{
-  "name": "sonos-http-api-legacy-lib",
-  "private": true,
-  "type": "commonjs",
-  "description": "Temporary shim: keeps the pre-modernization CommonJS code loadable while the root package is ESM. Deleted when the TypeScript port under src/ is complete."
-}
