@@ -61,8 +61,8 @@ const LEGACY_NAMES = [
 ];
 
 describe('createActionRegistry', () => {
-  it('registers every legacy action name ported so far', () => {
-    const registry = createActionRegistry();
+  it('registers every legacy action name', () => {
+    const registry = createActionRegistry({ cacheDir: '/tmp' });
     const names = registry.names();
 
     for (const name of LEGACY_NAMES) {

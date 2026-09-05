@@ -62,7 +62,12 @@ async function main(): Promise<void> {
   const app = createApp({
     system,
     settings,
-    registry: createActionRegistry(),
+    registry: createActionRegistry({
+      cacheDir: settings.cacheDir,
+      spotify: settings.spotify,
+      randomQueueLimit: settings.library.randomQueueLimit,
+      logger,
+    }),
     presets,
     tts: createTtsService(settings, { logger }),
     clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
