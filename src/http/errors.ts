@@ -1,7 +1,14 @@
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
-import { ArgumentError, UnknownServiceError } from '../discovery/errors.ts';
+import {
+  ArgumentError,
+  ItemNotFoundError,
+  NotCoordinatorError,
+  RequestFailedError,
+  RequestTimeoutError,
+  UnknownServiceError,
+} from '../discovery/errors.ts';
 
 export type HttpStatus = ContentfulStatusCode;
 
@@ -30,6 +37,14 @@ export class NotFoundError extends HttpError {
   }
 }
 
+/** The player (or an upstream music service) answered, but refused or failed the request. */
+export class BadGatewayError extends HttpError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(502, message, options);
+    this.name = 'BadGatewayError';
+  }
+}
+
 export class ServiceUnavailableError extends HttpError {
   constructor(message: string, options?: ErrorOptions) {
     super(503, message, options);
@@ -37,7 +52,11 @@ export class ServiceUnavailableError extends HttpError {
   }
 }
 
-/** The status code a thrown value should produce. Input and lookup errors are the client's fault. */
+/**
+ * The status code a thrown value should produce. Input and lookup errors are the client's fault
+ * (4xx); a player refusing or not answering a command is reported as a gateway problem (502 / 504)
+ * so that 500 is left for genuine bugs in this server.
+ */
 export function statusForError(error: unknown): HttpStatus {
   if (error instanceof HttpError) {
     return error.status;
@@ -54,6 +73,22 @@ export function statusForError(error: unknown): HttpStatus {
     error instanceof RangeError
   ) {
     return 400;
+  }
+
+  if (error instanceof ItemNotFoundError) {
+    return 404;
+  }
+
+  if (error instanceof NotCoordinatorError) {
+    return 409;
+  }
+
+  if (error instanceof RequestTimeoutError) {
+    return 504;
+  }
+
+  if (error instanceof RequestFailedError) {
+    return 502;
   }
 
   return 500;

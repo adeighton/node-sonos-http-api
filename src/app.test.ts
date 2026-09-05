@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { createApp } from './app.ts';
+import { SoapFaultError } from './discovery/errors.ts';
 import type { AppDeps } from './app.ts';
 import { ActionRegistry } from './actions/registry.ts';
 import { settingsSchema } from './config/schema.ts';
@@ -48,6 +49,14 @@ function testApp(webroot: string, options: TestAppOptions = {}) {
     usage: '/boom',
     description: '',
   });
+  registry.register(
+    'refused',
+    () =>
+      Promise.reject(
+        new SoapFaultError('http://192.168.1.5:1400/x', 'Seek', 711, 'Illegal seek target', ''),
+      ),
+    { usage: '/refused', description: '' },
+  );
   registry.register('loud', () => Promise.reject(new RangeError('too loud')), {
     usage: '/loud',
     description: '',
@@ -135,6 +144,24 @@ describe('createApp', () => {
       const range = await app.request('/loud');
       assert.equal(range.status, 400);
       assert.deepEqual(await range.json(), { status: 'error', error: 'too loud' });
+
+      const refused = await app.request('/1.%20Kitchen/refused');
+      assert.equal(refused.status, 502);
+      assert.deepEqual(await refused.json(), {
+        status: 'error',
+        error: 'Seek was rejected by the player: UPnP error 711 (Illegal seek target)',
+      });
+      const refusedLog = entries().find(
+        (entry) => entry.msg === 'request failed' && entry.status === 502,
+      );
+      assert.ok(refusedLog);
+      assert.equal(refusedLog.method, 'GET');
+      assert.equal(refusedLog.path, '/1. Kitchen/refused');
+      const err = refusedLog.err as Record<string, unknown>;
+      assert.equal(err.type, 'SoapFaultError');
+      assert.equal(err.errorCode, 711);
+      assert.equal(err.action, 'Seek');
+      assert.equal(err.url, 'http://192.168.1.5:1400/x');
 
       const failure = await app.request('/boom');
       assert.equal(failure.status, 500);

@@ -3,8 +3,17 @@ import { describe, it } from 'node:test';
 
 import { HTTPException } from 'hono/http-exception';
 
-import { ArgumentError, UnknownServiceError } from '../discovery/errors.ts';
 import {
+  ArgumentError,
+  ItemNotFoundError,
+  NotCoordinatorError,
+  RequestFailedError,
+  RequestTimeoutError,
+  SoapFaultError,
+  UnknownServiceError,
+} from '../discovery/errors.ts';
+import {
+  BadGatewayError,
   BadRequestError,
   HttpError,
   NotFoundError,
@@ -31,6 +40,13 @@ describe('http errors', () => {
     assert.equal(statusForError(new URIError('URI malformed')), 400);
     assert.equal(statusForError(new RangeError('too loud')), 400);
     assert.equal(statusForError(new HTTPException(401, { message: 'Unauthorized' })), 401);
+    assert.equal(statusForError(new ItemNotFoundError('Favorite not found')), 404);
+    assert.equal(statusForError(new NotCoordinatorError('Kitchen')), 409);
+    assert.equal(statusForError(new RequestTimeoutError('http://p', 10)), 504);
+    assert.equal(statusForError(new RequestFailedError('http://p', 500, 'x', '')), 502);
+    assert.equal(statusForError(new SoapFaultError('http://p', 'Play', 701, 'nope', '')), 502);
+    assert.equal(statusForError(new BadGatewayError('upstream')), 502);
+    assert.equal(new BadGatewayError('x').name, 'BadGatewayError');
     assert.equal(statusForError(new Error('boom')), 500);
     assert.equal(statusForError('string'), 500);
   });

@@ -34,6 +34,7 @@ import type {
   Track,
   UriType,
 } from './player-state.ts';
+import { ItemNotFoundError, NotCoordinatorError } from './errors.ts';
 import { SOAP_ACTIONS } from './soap.ts';
 import type { SoapAction, SoapClient, SoapValues } from './soap.ts';
 import type { BrowseItem, BrowseResult, LastChangeData, ZoneMemberData } from './types.ts';
@@ -785,7 +786,7 @@ export class Player extends EventEmitter<PlayerEvents> {
 
     const zone = this.system.zones.find((candidate) => candidate.uuid === this.uuid);
     if (!zone) {
-      throw new Error(`${this.roomName} is not the coordinator of a group`);
+      throw new NotCoordinatorError(this.roomName);
     }
 
     const updates = zone.members.map((member) => {
@@ -818,7 +819,7 @@ export class Player extends EventEmitter<PlayerEvents> {
         candidate.title?.toLowerCase() === wanted || candidate.uri.toLowerCase() === wanted,
     );
     if (!favorite) {
-      throw new Error('Favorite not found');
+      throw new ItemNotFoundError('Favorite not found');
     }
 
     let target: { uri: string; metadata?: string } = favorite;
@@ -843,7 +844,7 @@ export class Player extends EventEmitter<PlayerEvents> {
     const wanted = playlistName.toLowerCase();
     const playlist = playlists.find((candidate) => candidate.title?.toLowerCase() === wanted);
     if (!playlist) {
-      throw new Error('Playlist not found');
+      throw new ItemNotFoundError('Playlist not found');
     }
 
     await this.clearQueue();

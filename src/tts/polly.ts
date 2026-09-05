@@ -5,7 +5,7 @@ import { PollyClient, SynthesizeSpeechCommand, VoiceId } from '@aws-sdk/client-p
 import type { PollyClientConfig } from '@aws-sdk/client-polly';
 
 import type { PollyEngine } from '../config/schema.ts';
-import { BadRequestError } from '../http/errors.ts';
+import { BadGatewayError, BadRequestError } from '../http/errors.ts';
 import type { ClipCache } from './cache.ts';
 import type { Clip, TtsProvider, TtsRequest } from './provider.ts';
 
@@ -89,7 +89,7 @@ export function createPollyProvider(
           }),
         );
         if (!response.AudioStream) {
-          throw new Error('Polly answered without audio');
+          throw new BadGatewayError('Polly answered without audio');
         }
 
         await writeFile(temporary, await response.AudioStream.transformToByteArray());

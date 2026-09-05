@@ -1,5 +1,6 @@
 import type { Player, Zone } from '../discovery/player.ts';
 import type { Preset } from '../discovery/types.ts';
+import { BadRequestError, ServiceUnavailableError } from '../http/errors.ts';
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
 import { captureAllBackups, capturePlayerBackup, restorePreset } from './backup.ts';
@@ -118,7 +119,7 @@ export class Announcer {
           (a, b) => b.members.length - a.members.length,
         )[0];
         if (!biggest) {
-          throw new Error('No Sonos players are available for the announcement');
+          throw new ServiceUnavailableError('No Sonos players are available for the announcement');
         }
 
         const coordinator = biggest.coordinator;
@@ -146,7 +147,7 @@ export class Announcer {
             )
           : undefined;
         if (!first || !coordinator) {
-          throw new Error(`Preset room '${first?.roomName ?? ''}' is not a known player`);
+          throw new BadRequestError(`Preset room '${first?.roomName ?? ''}' is not a known player`);
         }
 
         return {

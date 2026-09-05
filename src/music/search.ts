@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { Player } from '../discovery/player.ts';
-import { BadRequestError, NotFoundError } from '../http/errors.ts';
+import { BadGatewayError, BadRequestError, NotFoundError } from '../http/errors.ts';
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
 import type { ActionSystem } from '../actions/registry.ts';
@@ -157,7 +157,9 @@ export class MusicSearch {
       signal: AbortSignal.timeout(this.#timeoutMs),
     });
     if (!response.ok) {
-      throw new Error(`${service.sonosName} search failed with status ${response.status}`);
+      throw new BadGatewayError(
+        `${service.sonosName} search failed with status ${response.status}`,
+      );
     }
 
     const results = service.parse(searchType, await response.json());

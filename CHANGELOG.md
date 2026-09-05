@@ -12,6 +12,11 @@ and 26. The vendored `sonos-discovery` library now lives in `src/discovery`.
   is 404; bad input (undecodable segment, non-numeric volume, unknown sub-action) is 400; no
   system discovered yet is 503; anything but `GET` is 405 with `Allow: GET`. The body is always
   `{"status":"error","error":"..."}` and no longer includes a stack trace.
+- A command the player refuses answers 502 with the UPnP error code and its meaning
+  (`Seek was rejected by the player: UPnP error 711 (Illegal seek target ...)`); a player that
+  does not answer in time is 504; a command that needs a group coordinator on a member is 409;
+  a missing favorite or playlist is 404. 500 now only means a bug in this server. Every failure
+  is logged with method, path, status and the error details (see the README).
 - CORS runs before authentication, so browser preflights succeed without credentials.
 - `/docs` (Swagger UI) is gone; `/` renders an index generated from the registered actions.
 - Text-to-speech is AWS Polly only. VoiceRSS, Microsoft, Google, macOS `say` and ElevenLabs

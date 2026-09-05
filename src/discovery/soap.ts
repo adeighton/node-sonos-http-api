@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 
-import { ArgumentError } from './errors.ts';
+import { ArgumentError, RequestFailedError, toSoapFault } from './errors.ts';
 import type { HttpStreamResponse, StreamHttpClient } from './http.ts';
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
@@ -135,17 +135,26 @@ export function createSoapClient(
       logger.trace({ url, action }, 'invoking soap action');
       const body = Buffer.from(envelope, 'utf8');
 
-      const response = await httpRequest({
-        url,
-        method: 'POST',
-        headers: {
-          'CONTENT-TYPE': 'text/xml; charset="utf-8"',
-          SOAPACTION: `"${action}"`,
-          'CONTENT-LENGTH': body.length,
-        },
-        body,
-        type: 'stream',
-      });
+      let response: HttpStreamResponse;
+      try {
+        response = await httpRequest({
+          url,
+          method: 'POST',
+          headers: {
+            'CONTENT-TYPE': 'text/xml; charset="utf-8"',
+            SOAPACTION: `"${action}"`,
+            'CONTENT-LENGTH': body.length,
+          },
+          body,
+          type: 'stream',
+        });
+      } catch (error) {
+        if (error instanceof RequestFailedError) {
+          throw toSoapFault(error, action.slice(action.indexOf('#') + 1));
+        }
+
+        throw error;
+      }
 
       logger.trace({ url, action, status: response.status }, 'soap action answered');
       return response;

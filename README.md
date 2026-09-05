@@ -127,8 +127,27 @@ Errors answer `{"status":"error","error":"<message>"}` with a meaningful status 
 | 400    | Bad input: unknown sub-action, non-numeric volume, bad encoding |
 | 404    | Unknown action, room, preset, favorite, playlist or clip        |
 | 405    | Anything but `GET` (the response carries `Allow: GET`)          |
-| 500    | The player rejected the command                                 |
+| 409    | The command needs a group coordinator and this room is not one  |
+| 500    | A bug in this server (please report it with the log line)       |
+| 502    | The player (or a music service) refused the command; the message carries the UPnP error code and its meaning, e.g. `Seek was rejected by the player: UPnP error 711 (Illegal seek target: no such track or position)` |
 | 503    | No Sonos system has been discovered yet, or TTS is not configured |
+| 504    | The player did not answer in time                                |
+
+Finding out why a request failed
+--------------------------------
+
+Every failed request is logged with the method, path, status and the full error, including the
+UPnP error code for player refusals. On the Pi the log is in journald:
+
+    ssh pi@man-in-the-ceiling.local journalctl -u sonos -n 200
+    ssh pi@man-in-the-ceiling.local journalctl -u sonos -f          # follow live
+
+With `LOG_FORMAT=json` in `.env` each line is a JSON object, so failures can be filtered:
+
+    journalctl -u sonos -o cat | grep '"msg":"request failed"' | grep '"status":50'
+
+Something that answers 502 repeatedly for the same request is a good candidate for a fix in this
+server (mapping it to a clearer error or avoiding the command), so keep the log line.
 
 State
 -----

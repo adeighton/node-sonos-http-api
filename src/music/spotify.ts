@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BadRequestError } from '../http/errors.ts';
+import { BadGatewayError, BadRequestError } from '../http/errors.ts';
 import { didlItem, dedupeTracks, stationName } from './types.ts';
 import type {
   MusicService,
@@ -131,7 +131,7 @@ export function createSpotifyService(options: SpotifyOptions = {}): MusicService
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      throw new Error(
+      throw new BadGatewayError(
         `Unable to authenticate with Spotify (status ${response.status}); check the client id and secret`,
       );
     }

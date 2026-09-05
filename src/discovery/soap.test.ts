@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { describe, it, mock } from 'node:test';
 
 import { fixturePath } from '../testing/fixtures.ts';
-import { ArgumentError } from './errors.ts';
+import { ArgumentError, RequestFailedError, SoapFaultError } from './errors.ts';
 import type { HttpRequestOptions, HttpStreamResponse } from './http.ts';
 import {
   SOAP_ACTIONS,
@@ -81,6 +81,35 @@ describe('createSoapClient', () => {
     const soap = createSoapClient(httpRequest);
 
     await assert.rejects(soap.invoke('http://127.0.0.1/x', SOAP_ACTIONS.Play), /unreachable/);
+  });
+
+  it('turns a UPnP fault answer into a SoapFaultError naming the action', async () => {
+    const httpRequest = mock.fn(() =>
+      Promise.reject(
+        new RequestFailedError(
+          'http://127.0.0.1/x',
+          500,
+          'Internal Server Error',
+          '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>711</errorCode><errorDescription>Illegal seek target</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>',
+        ),
+      ),
+    );
+    const soap = createSoapClient(httpRequest);
+
+    await assert.rejects(soap.invoke('http://127.0.0.1/x', SOAP_ACTIONS.Seek), (error: unknown) => {
+      assert.ok(error instanceof SoapFaultError);
+      assert.equal(error.action, 'Seek');
+      assert.equal(error.errorCode, 711);
+      return true;
+    });
+
+    const plain = mock.fn(() =>
+      Promise.reject(new RequestFailedError('http://127.0.0.1/x', 503, 'Busy', 'later')),
+    );
+    await assert.rejects(
+      createSoapClient(plain).invoke('http://127.0.0.1/x', SOAP_ACTIONS.Play),
+      (error: unknown) => error instanceof RequestFailedError && !(error instanceof SoapFaultError),
+    );
   });
 });
 
