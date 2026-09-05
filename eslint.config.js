@@ -84,6 +84,10 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/main.ts', 'scripts/**/*.ts'],
+    rules: { 'n/no-process-exit': 'off' },
+  },
+  {
     files: ['**/*.js', '**/*.mjs'],
     extends: [js.configs.recommended, prettier],
     languageOptions: { globals: globals.node },

@@ -17,11 +17,11 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node server.cjs",
-    "dev": "node --watch server.cjs",
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/main.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch --watch-path=src src/main.ts",
     "test": "node --disable-warning=ExperimentalWarning --test 'src/**/*.test.ts'",
     "test:watch": "node --disable-warning=ExperimentalWarning --test --watch 'src/**/*.test.ts'",
-    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.test.ts' --test-coverage-exclude='src/testing/**' --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=85 'src/**/*.test.ts'",
+    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.test.ts' --test-coverage-exclude='src/testing/**' --test-coverage-exclude='src/main.ts' --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=85 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
