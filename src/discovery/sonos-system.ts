@@ -31,6 +31,11 @@ import { asArray } from './xml.ts';
 export interface SonosSystemOptions {
   /** Only accept players from this household id (for homes with several Sonos systems). */
   household?: string;
+  /**
+   * Player IPs to contact directly, for networks where SSDP multicast cannot reach the players
+   * (VLANs, Docker). Discovery still listens to SSDP as well.
+   */
+  discoveryHosts?: string[];
   soundcloudClientId?: string;
 }
 
@@ -70,6 +75,7 @@ export interface SonosSystemDeps {
 }
 
 const PLAYER_PORT = 1400;
+const SEED_RETRY_MS = 5000;
 
 function isVisible(member: ZoneMemberData): boolean {
   // invisible == 1 marks BRIDGE, BOOST, SUB and the right channel of a stereo pair.
@@ -108,6 +114,9 @@ export class SonosSystem
   #anyPlayerIndex = 0;
   #started = false;
   #disposed = false;
+  #initializing = false;
+  #restartCount = 0;
+  #seedTimer: NodeJS.Timeout | undefined;
   readonly #onFound = (found: SsdpFound): void => {
     void this.#init(found);
   };
@@ -151,6 +160,7 @@ export class SonosSystem
   /** Stops discovery, unsubscribes from every player and closes the notification listener. */
   async dispose(): Promise<void> {
     this.#disposed = true;
+    clearTimeout(this.#seedTimer);
     this.#ssdp.off('found', this.#onFound);
     this.#ssdp.stop();
     await this.#teardown();
@@ -228,6 +238,32 @@ export class SonosSystem
     this.availableServices = {};
     this.#ssdp.start();
     this.#ssdp.once('found', this.#onFound);
+    this.#seedDiscoveryHosts();
+  }
+
+  /** Contacts the configured discovery hosts directly; retries are spaced out after a failure. */
+  #seedDiscoveryHosts(): void {
+    const hosts = this.#options.discoveryHosts ?? [];
+    clearTimeout(this.#seedTimer);
+    if (hosts.length === 0) {
+      return;
+    }
+
+    const delay = this.#restartCount === 0 ? 0 : SEED_RETRY_MS;
+    this.#restartCount += 1;
+    this.#seedTimer = setTimeout(() => {
+      this.#seedTimer = undefined;
+      for (const host of hosts) {
+        void this.#init(
+          {
+            ip: host,
+            location: `http://${host}:${PLAYER_PORT}/xml/device_description.xml`,
+            household: undefined,
+          },
+          true,
+        );
+      }
+    }, delay);
   }
 
   async #teardown(): Promise<void> {
@@ -245,18 +281,23 @@ export class SonosSystem
     ]);
   }
 
-  async #init(found: SsdpFound): Promise<void> {
-    if (this.#disposed) {
+  async #init(found: SsdpFound, trusted = false): Promise<void> {
+    if (this.#disposed || this.#initializing || this.#listener) {
       return;
     }
 
-    if (this.#options.household !== undefined && found.household !== this.#options.household) {
+    if (
+      !trusted &&
+      this.#options.household !== undefined &&
+      found.household !== this.#options.household
+    ) {
       this.#logger.debug({ household: found.household }, 'ignoring player from another household');
       this.#ssdp.once('found', this.#onFound);
       return;
     }
 
     this.#ssdp.stop();
+    this.#initializing = true;
 
     try {
       const response = await this.#http({ url: found.location, method: 'GET', type: 'stream' });
@@ -292,6 +333,8 @@ export class SonosSystem
     } catch (error) {
       this.#logger.error({ err: error, location: found.location }, 'discovery failed, retrying');
       this.#restart();
+    } finally {
+      this.#initializing = false;
     }
   }
 

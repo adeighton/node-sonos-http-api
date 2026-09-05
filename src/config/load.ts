@@ -15,6 +15,7 @@ export const ENV_OVERRIDES: ReadonlyArray<readonly [env: string, path: string]> 
   ['SONOS_HTTP_AUTH_USERNAME', 'auth.username'],
   ['SONOS_HTTP_AUTH_PASSWORD', 'auth.password'],
   ['SONOS_HOUSEHOLD', 'household'],
+  ['SONOS_DISCOVERY_HOSTS', 'discoveryHosts'],
   ['SONOS_ANNOUNCE_VOLUME', 'announceVolume'],
   ['SONOS_WEBHOOK_URL', 'webhook'],
   ['SONOS_POLLY_VOICE', 'aws.voice'],
@@ -97,7 +98,11 @@ export function applyEnvOverrides(raw: PlainObject, env: Record<string, string |
   for (const [name, path] of ENV_OVERRIDES) {
     const value = env[name];
     if (value !== undefined && value !== '') {
-      setPath(raw, path, value);
+      setPath(
+        raw,
+        path,
+        path === 'discoveryHosts' ? value.split(',').map((host) => host.trim()) : value,
+      );
     }
   }
 

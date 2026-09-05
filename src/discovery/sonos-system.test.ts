@@ -58,7 +58,9 @@ function streamResponse(): HttpStreamResponse {
   };
 }
 
-function setup(options: { household?: string; httpFails?: boolean } = {}) {
+function setup(
+  options: { household?: string; httpFails?: boolean; discoveryHosts?: string[] } = {},
+) {
   const ssdp = new FakeSsdp();
   const listeners: FakeListener[] = [];
   const subscribers: FakeSubscriber[] = [];
@@ -74,7 +76,7 @@ function setup(options: { household?: string; httpFails?: boolean } = {}) {
   const { logger, messages } = captureLogs();
 
   const system = new SonosSystem(
-    { household: options.household },
+    { household: options.household, discoveryHosts: options.discoveryHosts },
     {
       ssdp,
       http,
@@ -139,8 +141,8 @@ describe('SonosSystem', () => {
 
   describe('when a player is found', () => {
     it('fetches the device description to learn the local endpoint', async () => {
-      const { system, http, ssdp } = setup();
-      await setupDiscover(system, http, ssdp);
+      const { system, http, ssdp, discover } = setup();
+      await discover();
 
       assert.equal(http.mock.callCount(), 1);
       assert.equal(http.mock.calls[0]?.arguments[0].method, 'GET');
@@ -476,6 +478,57 @@ describe('SonosSystem', () => {
     });
   });
 
+  describe('discovery hosts', () => {
+    it('seeds discovery from the configured hosts even without SSDP replies', async () => {
+      const { system, ssdp, http, subscribers } = setup({
+        discoveryHosts: ['192.168.2.230', '192.168.2.231'],
+        household: 'Sonos_configured',
+      });
+
+      system.start();
+      await flushPromises();
+
+      assert.equal(ssdp.start.mock.callCount(), 1, 'SSDP still runs alongside');
+      assert.equal(http.mock.callCount(), 1, 'only the first host initializes the system');
+      assert.equal(
+        http.mock.calls[0]?.arguments[0].url,
+        'http://192.168.2.230:1400/xml/device_description.xml',
+      );
+      assert.equal(subscribers[0]?.url, 'http://192.168.2.230:1400/ZoneGroupTopology/Event');
+      assert.equal(ssdp.stop.mock.callCount(), 1);
+    });
+
+    it('retries the hosts after a failure with a delay', async () => {
+      mock.timers.enable({ apis: ['setTimeout'] });
+      try {
+        const { system, http, messages } = setup({
+          discoveryHosts: ['192.168.2.230'],
+          httpFails: true,
+        });
+
+        system.start();
+        mock.timers.tick(0);
+        await flushPromises();
+        assert.equal(http.mock.callCount(), 1);
+        assert.ok(messages().includes('discovery failed, retrying'));
+
+        mock.timers.tick(4999);
+        await flushPromises();
+        assert.equal(http.mock.callCount(), 1, 'not before the retry delay');
+        mock.timers.tick(1);
+        await flushPromises();
+        assert.equal(http.mock.callCount(), 2);
+
+        await system.dispose();
+        mock.timers.tick(10_000);
+        await flushPromises();
+        assert.equal(http.mock.callCount(), 2, 'no retries after dispose');
+      } finally {
+        mock.timers.reset();
+      }
+    });
+  });
+
   describe('dispose', () => {
     it('stops scanning, unsubscribes everything and ignores later discoveries', async () => {
       const { system, ssdp, discover, topology, listeners, subscribers, http } = setup();
@@ -496,9 +549,3 @@ describe('SonosSystem', () => {
     });
   });
 });
-
-async function setupDiscover(system: SonosSystem, _http: unknown, ssdp: FakeSsdp): Promise<void> {
-  system.start();
-  ssdp.emit('found', FOUND);
-  await flushPromises();
-}

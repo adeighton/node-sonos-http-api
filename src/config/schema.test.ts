@@ -21,6 +21,7 @@ describe('settingsSchema', () => {
     assert.equal(settings.logFormat, 'pretty');
     assert.equal(settings.aws, undefined);
     assert.equal(settings.auth, undefined);
+    assert.deepEqual(settings.discoveryHosts, []);
   });
 
   it('coerces numeric strings (environment values) and validates ranges', () => {

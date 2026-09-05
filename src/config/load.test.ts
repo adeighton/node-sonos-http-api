@@ -72,6 +72,7 @@ describe('loadSettings', () => {
           AWS_SECRET_ACCESS_KEY: 'shh',
           LOG_LEVEL: 'debug',
           SONOS_WEBHOOK_URL: '',
+          SONOS_DISCOVERY_HOSTS: '192.168.2.230, 192.168.2.231',
         },
       });
 
@@ -84,6 +85,7 @@ describe('loadSettings', () => {
         engine: 'standard',
       });
       assert.equal(loaded.settings.logLevel, 'debug');
+      assert.deepEqual(loaded.settings.discoveryHosts, ['192.168.2.230', '192.168.2.231']);
       assert.equal(loaded.settings.webhook, undefined, 'empty values are ignored');
       assert.ok(
         !JSON.stringify(loaded.settings).includes('shh'),

@@ -36,6 +36,8 @@ export const settingsSchema = z.object({
   webroot: z.string().min(1).default('static'),
   presetDir: z.string().min(1).default('presets'),
   household: z.string().optional(),
+  /** Player IPs to contact directly when SSDP multicast cannot reach them (VLANs, Docker). */
+  discoveryHosts: z.array(z.string().min(1)).default([]),
   webhook: z.url().optional(),
   webhookType: z.string().min(1).default('type'),
   webhookData: z.string().min(1).default('data'),

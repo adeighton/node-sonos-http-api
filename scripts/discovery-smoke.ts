@@ -10,7 +10,14 @@ import { LOG_LEVELS, createLogger } from '../src/logger.ts';
 const requestedLevel = process.env.LOG_LEVEL;
 const level = LOG_LEVELS.find((candidate) => candidate === requestedLevel) ?? 'info';
 const logger = createLogger({ level });
-const system = new SonosSystem({ household: process.env.SONOS_HOUSEHOLD }, { logger });
+const discoveryHosts = (process.env.SONOS_DISCOVERY_HOSTS ?? '')
+  .split(',')
+  .map((host) => host.trim())
+  .filter((host) => host.length > 0);
+const system = new SonosSystem(
+  { household: process.env.SONOS_HOUSEHOLD, discoveryHosts },
+  { logger },
+);
 
 const timeout = setTimeout(() => {
   logger.error('no Sonos system found within 30 seconds');
