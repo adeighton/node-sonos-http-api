@@ -46,6 +46,7 @@ export function createActionContext(options: TestActionContextOptions = {}): Tes
       presets: new PresetStore(options.presetDir ?? '/nonexistent/presets'),
       logger: silentLogger,
       publicBaseUrl: 'http://127.0.0.1:5005',
+      version: '0.0.0-test',
     },
     system,
     player,

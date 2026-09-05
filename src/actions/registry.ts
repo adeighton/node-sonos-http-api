@@ -33,6 +33,8 @@ export interface ActionContext {
   logger: Logger;
   /** Where players can fetch clips from this server, e.g. `http://192.168.1.10:5005`. */
   publicBaseUrl: string;
+  /** The package version, for the debug endpoint. */
+  version: string;
 }
 
 /** An action handler. Values are the already-decoded URL segments after the action name. */

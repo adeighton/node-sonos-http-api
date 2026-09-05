@@ -96,6 +96,7 @@ export function createApp(deps: AppDeps): Hono {
         presets: deps.presets,
         logger,
         publicBaseUrl: deps.publicBaseUrl(),
+        version: deps.version,
       },
       action,
       values,
