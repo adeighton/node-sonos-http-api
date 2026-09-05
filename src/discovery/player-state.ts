@@ -46,24 +46,28 @@ export type SubPolarity = (typeof SUB_POLARITY)[keyof typeof SUB_POLARITY];
 export type PlaybackState =
   'PLAYING' | 'PAUSED_PLAYBACK' | 'STOPPED' | 'TRANSITIONING' | (string & {});
 
+/**
+ * Track metadata as parsed from DIDL-Lite. Fields that the metadata does not carry stay
+ * `undefined` (and therefore disappear from JSON), matching the behaviour clients rely on.
+ */
 export interface Track {
-  artist: string;
-  title: string;
-  album: string;
-  albumArtUri: string;
+  artist?: string;
+  title?: string;
+  album?: string;
+  albumArtUri?: string;
   absoluteAlbumArtUri?: string;
   duration: number;
   uri: string;
-  trackUri: string;
+  trackUri?: string;
   type: UriType;
-  stationName: string;
+  stationName?: string;
 }
 
 export interface NextTrack {
-  artist: string;
-  title: string;
-  album: string;
-  albumArtUri: string;
+  artist?: string;
+  title?: string;
+  album?: string;
+  albumArtUri?: string;
   absoluteAlbumArtUri?: string;
   duration: number;
   uri: string;

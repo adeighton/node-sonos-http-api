@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "html-entities": "1.0.x",
-    "xml-flow": "^1.0.4"
+    "xml-flow": "1.0.2"
   },
   "engines": {
     "node": ">=24"
