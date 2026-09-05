@@ -1,39 +1,42 @@
-[![PayPal donate button](https://img.shields.io/badge/paypal-donate-yellow.svg)](https://www.paypal.me/jishi "Donate once-off to this project using Paypal") [![Join the chat at gitter](https://img.shields.io/gitter/room/badges/shields.svg)](https://gitter.im/node-sonos-http-api/Lobby "Need assistance? Join the chat at Gitter.im") 
-
-⚠WARNING!⚠
-
-The Sonos S2 update, released June 2020, still works with this API. However, it might break in the future if and when Sonos decide to drop UPnP as the control protocol. 
-
-
-Feel free to use it as you please. Consider donating if you want to support further development. Reach out on the gitter chat if you have issues getting it to run, instead of creating new issues, thank you!
-
-If you are also looking for cloud control (ifttt, public webhooks etc), see the [bronos-client](http://www.bronos.net) project! That pi image also contains an installation of this http-api.  
-
 SONOS HTTP API
 ==============
 
-** Beta is no more, master is up to date with the beta now! **
+A simple HTTP API for controlling a Sonos system. This is a personal fork of
+[jishi/node-sonos-http-api](https://github.com/jishi/node-sonos-http-api), rewritten in
+TypeScript for Node 24+ with AWS Polly text-to-speech and a small doorbell/announcement rig
+(`clip`, `clipall`, `clippreset`). It runs as a systemd service on a Raspberry Pi and is deployed
+with `deploy.sh`.
 
-**This application requires node 4.0.0 or higher!**
+**Requires Node.js 24 or newer.** The server runs the TypeScript sources directly (Node's built-in
+type stripping), so there is no build step.
 
-**This should now work on Node 6+, please let me know if you have issues**
-
-A simple http based API for controlling your Sonos system.
-
-There is a simple sandbox at /docs (incomplete atm)
+Sonos still exposes the UPnP control protocol this API relies on. It may stop working if Sonos
+ever drops it.
 
 USAGE
 -----
 
-Start by fixing your dependencies. Invoke the following command:
+Install the dependencies:
 
-`npm install --production`
+    npm ci --omit=dev
 
-This will download the necessary dependencies if possible.
+Start the server:
 
-start the server by running
+    npm start
 
-`npm start`
+The server listens on port 5005 by default and prints an index of every available action at
+`http://localhost:5005/`.
+
+For development:
+
+| Command                 | What it does                                                        |
+| ----------------------- | ------------------------------------------------------------------- |
+| `npm run dev`           | Starts the server and restarts it when a file under `src/` changes |
+| `npm test`              | Runs the unit tests (`node --test`)                                 |
+| `npm run test:watch`    | Re-runs the tests on change                                         |
+| `npm run check`         | Typecheck, lint, format check and tests with the coverage gate      |
+| `npm run smoke:discovery` | Discovers the real Sonos system on the LAN and prints the zones   |
+| `npm run webhook-echo`  | Starts a receiver on port 5007 that prints every webhook it gets    |
 
 Now you can control your system by invoking the following commands:
 
@@ -45,7 +48,6 @@ Now you can control your system by invoking the following commands:
 	http://localhost:5005/preset/{JSON preset}
 	http://localhost:5005/preset/{predefined preset name}
 	http://localhost:5005/reindex
-	http://localhost:5005/{room name}/sleep/{timeout in seconds or "off"}
 	http://localhost:5005/{room name}/sleep/{timeout in seconds or "off"}
 	http://localhost:5005/{room name}/{action}[/{parameter}]
 
@@ -69,6 +71,8 @@ Example:
 `http://localhost:5005/living room/repeat/on`
 (will turn on repeat mode for group)
 
+Room names are matched case-insensitively. If the first path segment is not a room, the action
+runs against any player (useful for `zones`, `preset`, `sayall`, `pauseall` and so on).
 
 The actions supported as of today:
 
@@ -88,28 +92,43 @@ The actions supported as of today:
 * favorite
 * favorites (with optional "detailed" parameter)
 * playlist
+* playlists (with optional "detailed" parameter)
 * lockvolumes / unlockvolumes (experimental, will enforce the volume that was selected when locking!)
 * repeat (on(=all)/one/off(=none)/toggle)
 * shuffle (on/off/toggle)
 * crossfade (on/off/toggle)
 * pauseall (with optional timeout in minutes)
 * resumeall (will resume the ones that was pause on the pauseall call. Useful for doorbell, phone calls, etc. Optional timeout)
-* say
-* sayall
-* saypreset
+* say / sayall / saypreset
+* clip / clipall / clippreset (announce a custom mp3 clip)
 * queue
 * clearqueue
+* setavtransporturi
 * sleep (values in seconds)
 * linein (only analog linein, not PLAYBAR yet)
-* clip (announce custom mp3 clip)
-* clipall
-* clippreset
-* join / leave  (Grouping actions)
+* join / leave / ungroup / isolate / add (Grouping actions)
 * sub (on/off/gain/crossover/polarity) See SUB section for more info
 * nightmode (on/off/toggle, PLAYBAR only)
 * speechenhancement (on/off/toggle, PLAYBAR only)
 * bass/treble (use -10 through to 10 as the value. 0 is neutral)
+* tunein / bbcsounds / siriusxm
+* spotify / applemusic / amazonmusic / napster / aldilifemusic
+* musicsearch
+* services / debug / reindex
 
+Responses
+---------
+
+Every action answers with JSON. Actions without a return value answer `{"status":"success"}`.
+Errors answer `{"status":"error","error":"<message>"}` with a meaningful status code:
+
+| Status | When                                                          |
+| ------ | ------------------------------------------------------------- |
+| 400    | Bad input: unknown sub-action, non-numeric volume, bad encoding |
+| 404    | Unknown action, room, preset, favorite, playlist or clip        |
+| 405    | Anything but `GET` (the response carries `Allow: GET`)          |
+| 500    | The player rejected the command                                 |
+| 503    | No Sonos system has been discovered yet, or TTS is not configured |
 
 State
 -----
@@ -211,62 +230,6 @@ The first player listed in the example, "room1", will become the coordinator. It
 Favorite will have precedence over a uri.
 pauseOthers will pause all zones before applying the preset, effectively muting your system.  sleep is an optional value that enables the sleep timer and is defined in total seconds (600 = 10 minutes).
 
-presets.json (deprecated, use preset files instead)
------------
-
-You can create a file with pre made presets, called presets.json. It will be loaded upon start, any changes requires a restart of the server.
-
-Example content:
-
-```json
-{
-  "all": {
-    "playMode": {
-      "shuffle": true
-    },
-    "players": [
-      {
-        "roomName": "Bathroom",
-        "volume": 10
-      },
-      {
-        "roomName": "Kitchen",
-        "volume": 10
-      },
-      {
-        "roomName": "Office",
-        "volume": 10
-      },
-      {
-        "roomName": "Bedroom",
-        "volume": 10
-      },
-      {
-        "roomName": "TV Room",
-        "volume": 15
-      }
-    ],
-    "pauseOthers": true
-  },
-  "tv": {
-    "players": [
-      {
-        "roomName": "TV Room",
-        "volume": 20
-      }
-    ],
-    "pauseOthers": true,
-    "uri": "x-rincon-stream:RINCON_000XXXXXXXXXX01400"
-  }
-}
-```
-
-
-In the example, there is one preset called `all`, which you can apply by invoking:
-
-`http://localhost:5005/preset/all`
-
-
 presets folder
 --------------
 
@@ -312,67 +275,81 @@ Example content:
 
 There is an example.json bundled with this repo. The name of the file will become the name of the preset.
 
-settings.json
+Configuration
 -------------
 
-If you want to change default settings, you can create a settings.json file and put in the root folder. This will be parsed as JSON5, to be more forgiving. See http://json5.org/ for more info.
+Settings come from two places, in this order of precedence:
 
-Available options are:
+1. Environment variables (see `.env.example`). `npm start` loads a `.env` file next to
+   `package.json` when it exists. This is the place for every secret.
+2. `settings.json` in the project root, parsed as JSON5 (comments and trailing commas allowed).
+   Keys this version does not use are reported once at startup and ignored.
 
-* port: change the listening port
-* ip: change the listening IP
-* https: use https which requires a key and certificate or pfx file
-* auth: require basic auth credentials which requires a username and password
-* announceVolume: the percentual volume use when invoking say/sayall without any volume parameter
-* presetDir: absolute path to look for presets (folder must exist!)
-* household: when theres multiple sonos accounts on one network (example: Sonos_ab7d67898dcc5a6d, find it in [Your sonos IP]:1400/status/zp). Note that the value after the '.' should not be removed. See more info here: https://github.com/jishi/node-sonos-http-api/issues/783
+Available `settings.json` options:
 
+* `port`: the listening port (default 5005)
+* `ip`: the listening IP (default 0.0.0.0)
+* `securePort` and `https`: serve https too, from `key` + `cert` files or a `pfx` + `passphrase`
+* `auth`: require basic auth credentials, `{ "username": ..., "password": ... }`
+* `announceVolume`: the volume used by say/clip when the request gives none (default 40)
+* `presetDir`: folder to load presets from (default `presets`)
+* `cacheDir`: folder for the music library cache (default `cache`)
+* `household`: pick one Sonos household when a network has several (e.g. `Sonos_ab7d67898dcc5a6d`)
+* `discoveryHosts`: array of player IPs to contact directly when SSDP multicast cannot reach the
+  players (for example from another subnet). Discovery still runs normally as well.
+* `webhook`, `webhookType`, `webhookData`, `webhookHeaderName`, `webhookHeaderContents`: see Webhook
+* `aws`: Polly settings, see Say
+* `spotify`: `{ "clientId": ..., "clientSecret": ... }` for music search
+* `library.randomQueueLimit`: how many library tracks a song search queues (default 50)
+* `soundcloud`: SoundCloud client id for high resolution cover art
+* `logLevel`: `trace`, `debug`, `info` (default), `warn` or `error`
+* `logFormat`: `pretty` (default) or `json` (one JSON object per line, handy under journald)
 
 Example:
-```json
-	{
-	  "voicerss": "Your api key for TTS with voicerss",
-	  "microsoft": {
-	    "key": "Your api for Bing speech API",
-	    "name": "ZiraRUS"
-	  },
-	  "port": 5005,
-	  "ip": "0.0.0.0",
-	  "securePort": 5006,
-	  "https": {
-	    "key": "/path/to/key.pem",
-	    "cert" : "/path/to/cert.pem"
 
-	    //... for pfx (alternative configuration)
-	    "pfx": "/path/to/pfx.pfx",
-	    "passphrase": "your-passphrase-if-applicable"
-	  },
-	  "auth": {
-	    "username": "admin",
-	    "password": "password"
-	  },
-	  "announceVolume": 40,
-	  "pandora": {
-	    "username": "your-pandora-account-email-address",
-	    "password": "your-pandora-password"
-	  },
-	  "spotify": {
-	    "clientId": "your-spotify-application-clientId",
-	    "clientSecret": "your-spotify-application-clientSecret"
-	  },
-	  "library": {
-	    "randomQueueLimit": 50
-	  }
-	}
+```json5
+{
+  port: 5005,
+  ip: '0.0.0.0',
+  announceVolume: 40,
+  aws: { voice: 'Joanna', engine: 'neural' },
+  discoveryHosts: ['192.168.2.230'],
+  library: { randomQueueLimit: 50 },
+}
 ```
 
-Override as it suits you.
+Environment variables override the file. The full list is in `.env.example`; the important ones:
+
+| Variable                                             | Overrides                    |
+| ---------------------------------------------------- | ---------------------------- |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Polly credentials (read by the AWS SDK) |
+| `SONOS_POLLY_VOICE`, `SONOS_POLLY_ENGINE`            | `aws.voice`, `aws.engine`    |
+| `SONOS_HTTP_PORT`, `SONOS_HTTP_IP`, `SONOS_HTTP_SECURE_PORT` | `port`, `ip`, `securePort` |
+| `SONOS_HTTP_AUTH_USERNAME`, `SONOS_HTTP_AUTH_PASSWORD` | `auth`                     |
+| `SONOS_HOUSEHOLD`, `SONOS_DISCOVERY_HOSTS` (comma separated) | `household`, `discoveryHosts` |
+| `SONOS_ANNOUNCE_VOLUME`, `SONOS_WEBHOOK_URL`         | `announceVolume`, `webhook`  |
+| `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SOUNDCLOUD_CLIENT_ID` | `spotify`, `soundcloud` |
+| `LOG_LEVEL`, `LOG_FORMAT`                            | `logLevel`, `logFormat`      |
+
+Never commit `.env` or `settings.json`; both are git-ignored.
+
+Deploying to the Raspberry Pi
+-----------------------------
+
+`deploy.sh` rsyncs the project to the Pi, installs the production dependencies, writes the systemd
+unit and restarts the service. It refuses to run against a Pi without Node 24 and never copies
+`.env`: provision that once with
+
+    scp .env pi@man-in-the-ceiling.local:node-sonos-http-api/.env
+
+Watch the service with `ssh pi@man-in-the-ceiling.local journalctl -u sonos -f`.
 
 Note for Spotify users!
 -----------------------
 
-To use Spotify, go to https://developer.spotify.com/my-applications/#!/applications/create and create a Spotify application to get your client keys. You can name it Sonos or anything else and you don't have to change any values. Use the Client ID and the Client Secret values in the settings.json file as indicated above.
-
+To use Spotify music search, go to https://developer.spotify.com/dashboard and create a Spotify
+application to get your client keys. Put the Client ID and Client Secret in `.env` as
+`SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` (or under `spotify` in `settings.json`).
 
 Favorites
 ---------
@@ -396,374 +373,45 @@ and it will replace the queue with the playlist and starts playing.
 Say (TTS support)
 -----------------
 
-Experimental support for TTS. Today the following providers are available:
+Text-to-speech uses AWS Polly. Put your AWS credentials in `.env` (`AWS_REGION`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) and optionally pick a voice and engine:
 
-* voicerss
-* Microsoft Cognitive Services (Bing Text to Speech API)
-* AWS Polly
-* Google (default)
-* macOS say command
-* Elevenlabs
-
-It will use the one you configure in settings.json. If you define settings for multiple TTS services, it will not be guaranteed which one it will choose!
-
-#### VoiceRSS
-
-This REQUIRES a registered API key from voiceRSS! See http://www.voicerss.org/ for info.
-
-You need to add this to a file called settings.json (create if it doesn't exist), like this:
-
-```
+```json5
 {
-  "voicerss": "f5e77e1d42063175b9219866129189a3"
+  aws: {
+    voice: 'Joanna', // any Polly VoiceId, e.g. Brian, Amy, Matthew, Joanna
+    engine: 'neural', // neural (default), standard, long-form or generative
+  },
 }
 ```
 
-Replace the code above (it is just made up) with the api-key you've got after registering.
+Without credentials the say actions answer 503 with a message explaining what is missing.
 
-Action is:
+Actions:
 
-	/[Room name]/say/[phrase][/[language_code]][/[announce volume]]
-	/sayall/[phrase][/[language_code]][/[announce volume]]
+	/{room name}/say/{phrase}[/{voice}][/{announce volume}]
+	/sayall/{phrase}[/{voice}][/{announce volume}]
+	/saypreset/{preset name}/{phrase}[/{voice}][/{announce volume}]
 
-Example:
-
-	/Office/say/Hello, dinner is ready
-	/Office/say/Hej, maten är klar/sv-se
-	/sayall/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/90
-	/Office/say/Hej, maten är klar/sv-se/90
-
-language code needs to be before volume if specified.
-
-Sayall will group all players, set 40% volume (by default) and then try and restore everything as the way it where. Please try it out, it will probably contain glitches but please report detailed descriptions on what the problem is (starting state, error that occurs, and the final state of your system).
-
-The supported language codes are:
-
-| Language code | Language |
-| ------------- | -------- |
-| ca-es | Catalan  |
-| zh-cn | Chinese (China) |
-| zh-hk |Chinese (Hong Kong) |
-| zh-tw | Chinese (Taiwan) |
-| da-dk | Danish |
-| nl-nl | Dutch |
-| en-au | English (Australia) |
-| en-ca | English (Canada) |
-| en-gb | English (Great Britain) |
-| en-in | English (India) |
-| en-us | English (United States) |
-| fi-fi | Finnish |
-| fr-ca | French (Canada) |
-| fr-fr | French (France) |
-| de-de | German |
-| it-it | Italian |
-| ja-jp | Japanese |
-| ko-kr | Korean |
-| nb-no | Norwegian |
-| pl-pl | Polish |
-| pt-br | Portuguese (Brazil) |
-| pt-pt | Portuguese (Portugal) |
-| ru-ru | Russian |
-| es-mx | Spanish (Mexico) |
-| es-es | Spanish (Spain) |
-| sv-se | Swedish (Sweden) |
-
-#### Microsoft
-This one also requires a registered api key. You can sign up for free here: https://www.microsoft.com/cognitive-services/en-US/subscriptions?mode=NewTrials and select "Bing Speech - Preview".
-
-The following configuration is available (the entered values except key are default, and may be omitted):
-
-```json
-	{
-	  "microsoft": {
-	    "key": "Your api for Bing speech API",
-	    "name": "ZiraRUS"
-	  }
-	}
-```
-
-You change language by specifying a voice name correlating to the desired language.
-Name should be specified according to this list: https://www.microsoft.com/cognitive-services/en-us/speech-api/documentation/API-Reference-REST/BingVoiceOutput#SupLocales
-where name is the right most part of the voice font name (without optional Apollo suffix). Example:
-
-`Microsoft Server Speech Text to Speech Voice (ar-EG, Hoda)` name should be specified as `Hoda`
-
-`Microsoft Server Speech Text to Speech Voice (de-DE, Stefan, Apollo)` name should be specified as `Stefan`
-
-`Microsoft Server Speech Text to Speech Voice (en-US, BenjaminRUS)` name should be specified as `BenjaminRUS`
-
-Action is:
-
-	/[Room name]/say/[phrase][/[name]][/[announce volume]]
-	/sayall/[phrase][/[name]][/[announce volume]]
-
-Example:
+Examples:
 
 	/Office/say/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/BenjaminRUS
-	/Office/say/Guten morgen/Stefan
+	/Office/say/Hello, dinner is ready/Brian
 	/sayall/Hello, dinner is ready
 	/Office/say/Hello, dinner is ready/90
-	/Office/say/Guten morgen/Stefan/90
+	/Office/say/Hello, dinner is ready/Brian/90
 
-Supported voices are:
+The voice segment is any Polly voice id and must come before the volume. A phrase that starts
+with `<speak>` is sent as SSML, so you can add pauses, emphasis or spell things out:
 
- Hoda, Naayf, Ivan, HerenaRUS, Jakub, Vit, HelleRUS, Michael, Karsten, Hedda, Stefan, Catherine, Linda, Susan, George, Ravi, ZiraRUS, BenjaminRUS, Laura, Pablo, Raul, Caroline, Julie, Paul, Cosimo, Ayumi, Ichiro, Daniel, Irina, Pavel, HuihuiRUS, Yaoyao, Kangkang, Tracy, Danny, Yating, Zhiwei
+	/Office/say/<speak>Dinner is ready<break time="500ms"/>come downstairs</speak>
 
-See https://www.microsoft.com/cognitive-services/en-us/speech-api/documentation/API-Reference-REST/BingVoiceOutput#SupLocales to identify
-which language and gender it maps against. If your desired voice is not in the list of supported one, raise an issue about adding it or send me a PR.
+Generated clips are cached in `static/tts` and reused for identical phrase, voice and engine.
 
-#### AWS Polly
-
-Requires AWS access tokens, which you generate for your user. Since this uses the AWS SDK, it will look for settings in either Environment variables, the ~/.aws/credentials or ~/.aws/config.
-
-You can also specify it for this application only, using:
-```json
-	{
-	  "aws": {
-	    "credentials": {
-	      "region": "eu-west-1",
-	      "accessKeyId": "Your access key id",
-	      "secretAccessKey": "Your secret"
-	    },
-	    "name": "Joanna"
-	  }
-	}
-```
-
-To select the neural engine, append `Neural` to the name, e.g. `DanielNeural`.
-
-Choose the region where you registered your account, or the one closest to you.
-
-If you have your credentials elsewhere and want to stick with the default voice, you still need to make sure that the aws config option is set to trigger AWS TTS:
-
-```json
-	{
-	  "aws": {}
-	}
-```
-
-Action is:
-
-	/[Room name]/say/[phrase][/[name]][/[announce volume]]
-	/sayall/[phrase][/[name]][/[announce volume]]
-
-Example:
-
-	/Office/say/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/Nicole
-	/Office/say/Hej, maten är klar/Astrid
-	/sayall/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/90
-	/Office/say/Hej, maten är klar/Astrid/90
-
-This is the current list of voice names and their corresponding language and accent (as of Dec 2016).
-To get a current list of voices, you would need to use the AWS CLI and invoke the describe-voices command.
-
-| Language | Code | Gender | Name |
-| --------- | ---- | ------ | ---- |
-| Australian English | en-AU | Female | Nicole |
-| Australian English | en-AU | Male | Russell |
-| Brazilian Portuguese | pt-BR | Female | Vitoria |
-| Brazilian Portuguese | pt-BR | Male | Ricardo |
-| British English | en-GB | Male | Brian |
-| British English | en-GB | Female | Emma |
-| British English | en-GB | Female | Amy |
-| Canadian French | fr-CA | Female | Chantal |
-| Castilian Spanish | es-ES | Female | Conchita |
-| Castilian Spanish | es-ES | Male | Enrique |
-| Danish | da-DK | Female | Naja |
-| Danish | da-DK | Male | Mads |
-| Dutch | nl-NL | Male | Ruben |
-| Dutch | nl-NL | Female | Lotte |
-| French | fr-FR | Male | Mathieu |
-| French | fr-FR | Female | Celine |
-| German | de-DE | Female | Marlene |
-| German | de-DE | Male | Hans |
-| Icelandic | is-IS | Male | Karl |
-| Icelandic | is-IS | Female | Dora |
-| Indian English | en-IN | Female | Raveena |
-| Italian | it-IT | Female | Carla |
-| Italian | it-IT | Male | Giorgio |
-| Japanese | ja-JP | Female | Mizuki |
-| Norwegian | nb-NO | Female | Liv |
-| Polish | pl-PL | Female | Maja |
-| Polish | pl-PL | Male | Jacek |
-| Polish | pl-PL | Male | Jan |
-| Polish | pl-PL | Female | Ewa |
-| Portuguese | pt-PT | Female | Ines |
-| Portuguese | pt-PT | Male | Cristiano |
-| Romanian | ro-RO | Female | Carmen |
-| Russian | ru-RU | Female | Tatyana |
-| Russian | ru-RU | Male | Maxim |
-| Swedish | sv-SE | Female | Astrid |
-| Turkish | tr-TR | Female | Filiz |
-| US English | en-US | Male | Justin |
-| US English | en-US | Female | Joanna |
-| US English | en-US | Male | Joey |
-| US English | en-US | Female | Ivy |
-| US English | en-US | Female | Salli |
-| US English | en-US | Female | Kendra |
-| US English | en-US | Female | Kimberly |
-| US Spanish | es-US | Female | Penelope |
-| US Spanish | es-US | Male | Miguel |
-| Welsh | cy-GB | Female | Gwyneth |
-| Welsh English | en-GB-WLS | Male | Geraint |
-
-#### Elevenlabs
-
-Elevenlabs is a TTS service enabling generatiung TTS audio files using AI generated voices.
-
-Requires API Key and optionally default voiceId.
-
-Since Elevenlabs AI models are multilingual by default, there is no need (nor place) for `language` parameter in 
-Elevenlabs API. Because of this, `language` parameter in URL is used to inject custom `voiceId` on per-request basis. You will
-need to either configure default voiceId in `settings.json` or provide `voiceId` with every HTTP request.
-
-##### Config
-
-Minimal:
-```json
-	{
-	  "elevenlabs": {
-		"auth": {
-		  "apiKey": ""
-		}
-	  }
-	}
-```
-
-Full:
-```json
-	{
-	  "elevenlabs": {
-		"auth": {
-		  "apiKey": ""
-		},
-		"config": {
-		  "voiceId": "",
-		  "stability": 0.5,
-		  "similarityBoost": 0.5,
-		  "speakerBoost": true,
-		  "style": 1,
-		  "modelId": "eleven_multilingual_v2"
-		}
-	  }
-	}
-```
-
-#### Google (default if no other has been configured)
-
-Does not require any API keys. Please note that Google has been known in the past to change the requirements for its Text-to-Speech API, and this may stop working in the future. There is also limiations to how many requests one is allowed to do in a specific time period.
-
-The following language codes are supported
-
-| Language code | Language |
-| ------------- | -------- |
-| af | Afrikaans |
-| sq | Albanian |
-| ar | Arabic |
-| hy | Armenian |
-| bn | Bengali |
-| ca | Catalan |
-| zh | Chinese |
-| zh-cn | Chinese (Mandarin/China) |
-| zh-tw | Chinese (Mandarin/Taiwan) |
-| zh-yue | Chinese (Cantonese) |
-| hr | Croatian |
-| cs | Czech |
-| da | Danish |
-| nl | Dutch |
-| en | English |
-| en-au | English (Australia) |
-| en-gb | English (Great Britain) |
-| en-us | English (United States) |
-| eo | Esperanto |
-| fi | Finnish |
-| fr | Franch |
-| de | German |
-| el | Greek |
-| hi | Hindi |
-| hu | Hungarian |
-| is | Icelandic |
-| id | Indonesian |
-| it | Italian |
-| ja | Japanese |
-| ko | Korean |
-| la | Latin |
-| lv | Latvian |
-| mk | Macedonian |
-| no | Norwegian |
-| pl | Polish |
-| pt | Portuguese |
-| pt-br | Portuguese (Brazil) |
-| ro | Romanian |
-| ru | Russian |
-| sr | Serbian |
-| sk | Slovak |
-| es | Spanish |
-| es-es | Spanish (Spain) |
-| es-us | Spanish (United States) |
-| sw | Swahili |
-| sv | Swedish |
-| ta | Tamil |
-| th | Thai |
-| tr | Turkish |
-| vi | Vietnamese |
-| cy | Welsh |
-
-Action is:
-
-	/[Room name]/say/[phrase][/[language_code]][/[announce volume]]
-	/sayall/[phrase][/[language_code]][/[announce volume]]
-
-#### macOS say command
-On macOS the "say" command can be used for text to speech. If your installation runs on macOS you can activate the system TTS by giving an empty configuration:
-
-```json
-{
-  "macSay": {}
-}
-```
-
-Or you can provide a default voice and a speech rate:
-
-```json
-{
-  "macSay": {
-  	"voice" : "Alex",
-  	"rate": 90
-  }
-}
-```
-
-Action is:
-
-	/[Room name]/say/[phrase][/[voice]][/[announce volume]]
-	/sayall/[phrase][/[voice]][/[announce volume]]
-
-Example:
-
-	/Office/say/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/Agnes
-	/Office/say/Guten morgen/Anna
-	/sayall/Hello, dinner is ready
-	/Office/say/Hello, dinner is ready/90
-	/Office/say/Guten morgen/Anna/90
-
-Supported voices are:
-
-Alex, Alice, Alva, Amelie, Anna, Carmit, Damayanti, Daniel, Diego, Ellen, Fiona, Fred, Ioana, Joana, Jorge, Juan, Kanya, Karen, Kyoko, Laura, Lekha, Luca, Luciana, Maged, Mariska, Mei-Jia, Melina, Milena, Moira, Monica, Nora, Paulina, Samantha, Sara, Satu, Sin-ji, Tessa, Thomas, Ting-Ting, Veena, Victoria, Xander, Yelda, Yuna, Yuri, Zosia, Zuzana
-
-A list of available voices can be printed by this command:
-```
-   say -v '?'
-```
-
-See also https://gist.github.com/mculp/4b95752e25c456d425c6 and https://stackoverflow.com/questions/1489800/getting-list-of-mac-text-to-speech-voices-programmatically
-
-To download more voices go to: System Preferences -> Accessibility -> Speech -> System Voice
+`sayall` groups every player, sets the announce volume (40% by default) and restores the previous
+grouping, volumes and playback afterwards. `saypreset` does the same on the players of a preset.
+Announcements are played one at a time: overlapping requests queue up instead of interrupting
+each other.
 
 Line-in
 -------
@@ -786,6 +434,7 @@ Like "Say" but instead of a phrase, reference a custom track from the `static/cl
 
     /{Room name}/clip/{filename}[/{announce volume}]
     /clipall/{filename}[/{announce volume}]
+    /clippreset/{preset name}/{filename}[/{announce volume}]
 
 Examples:
 
@@ -793,6 +442,7 @@ Examples:
     /clipall/sample_clip.mp3/80
     /Office/clip/sample_clip.mp3
     /Office/clip/sample_clip.mp3/30
+    /clippreset/doorbell/ding-dong-doorbell.mp3
 
 *Pro-tip: announce your arrival with an epic theme song!*
 
@@ -993,30 +643,10 @@ SiriusXM
 You can specify a SiriusXM channel number or station name and the station will be played.
 
 ```
-/RoomName/siriusXM/{channel number,station name}
+/RoomName/siriusxm/{channel number,station name}
+/RoomName/siriusxm/channels    lists the known channel numbers
+/RoomName/siriusxm/stations    lists the known station names
 ```
-
-
-Pandora
-----------------------
-Perform a search for one of your Pandora stations and begin playing. Give the currently playing song a thumbs up or thumbs down. Requires a valid Pandora account and credentials.
-
-The following endpoints are available:
-
-```
-/RoomName/pandora/play/{station name}     Plays the closest match to the specified station name in your list of Pandora stations
-/RoomName/pandora/thumbsup                Gives the current playing Pandora song a thumbs up
-/RoomName/pandora/thumbsdown              Gives the current playing Pandora song a thumbs down
-```
-
-Your Pandora credentials need to be added to the settings.json file
-   ```
-          ,
-          "pandora": {
-            "username": "your-pandora-account-email-address",
-            "password": "your-pandora-password"
-          }
-  ```
 
 
 Tunein
@@ -1052,7 +682,7 @@ The following endpoint is available:
 Service options: apple, spotify, deezer, elite, library
 
 Type options for apple, spotify, deezer, and elite: album, song, station, playlist
-Station plays a Pandora like artist radio station for a specified artist name.
+Station plays an artist radio station for a specified artist name.
 Apple Music also supports song titles and artist name + song title.
 
 Type options for library: album, song, load
@@ -1061,6 +691,7 @@ The music library will also get loaded the first time that the library service i
 used if the load command has not been issued before.
 
 Search terms for song for all services: artist name, song title, artist name + song title
+Terms may also use specifiers: artist:red hot chili peppers track:dark necessities album:the getaway
 Search terms for album for all services: artist name, album title, artist name + album title
 
 Search terms for station for apple: artist name, song title, artist name + song title
@@ -1149,7 +780,7 @@ or
 }
 ```
 
-"data" property will be equal to the same data as you would get from /RoomName/state or /zones. There is an example endpoint in the root if this project called test_endpoint.js which you may fire up to get an understanding of what is posted, just invoke it with "node test_endpoint.js" in a terminal, and then start the http-api in another terminal.
+"data" property will be equal to the same data as you would get from /RoomName/state or /zones. `npm run webhook-echo` starts a receiver on port 5007 that prints everything it is posted, so you can see the payloads while the API runs in another terminal.
 
 
 Server Sent Events
@@ -1158,7 +789,7 @@ Server Sent Events
 As an alternative to the web hook you can also call the `/events` endpoint to receive every state change and topology change as [Server Sent Event](https://html.spec.whatwg.org/multipage/server-sent-events.html#server-sent-events).
 Compared to the web hook there is no configuration required on the server, and you can listen for events from multiple clients.
 
-Because it is a long-polling connection, you must take care of errors in your client code and re-connect if necessary.
+Because it is a long-polling connection, you must take care of errors in your client code and re-connect if necessary. The server sends a `: ping` comment line every 30 seconds to keep the connection alive.
 
 The server sends events formatted as single-line JSON in the format of Server Sent Events: every event starts with the string `data: `, followed by the single-line JSON formatted event, and is terminated by two new line characters.
 
@@ -1176,11 +807,6 @@ data: {"type":"volume-change","data":{"uuid":"RINCON_E2832F58D9074C45B","previou
 data: {"type":"volume-change","data":{"uuid":"RINCON_E2832F58D9074C45B","previousVolume":23,"newVolume":23,"roomName":"Office"}}
 
 ```
-
-DOCKER
------
-
-Docker usage is maintained by [Chris Nesbitt-Smith](https://github.com/chrisns) at [chrisns/docker-node-sonos-http-api](https://github.com/chrisns/docker-node-sonos-http-api)
 
 ## FIREWALL
 
