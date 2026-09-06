@@ -133,6 +133,13 @@ Errors answer `{"status":"error","error":"<message>"}` with a meaningful status 
 | 503    | No Sonos system has been discovered yet, or TTS is not configured |
 | 504    | The player did not answer in time                                |
 
+Multi-line phrases
+------------------
+
+A `say` phrase may contain newlines; encode them as `%0A` like any other character. Polly reads
+them as sentence breaks, which is usually what you want for a briefing built from several
+paragraphs.
+
 Finding out why a request failed
 --------------------------------
 

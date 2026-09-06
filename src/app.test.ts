@@ -171,6 +171,44 @@ describe('createApp', () => {
     });
   });
 
+  it('routes paths holding line terminators, which Hono wildcards cannot match decoded', async () => {
+    await withWebroot(async (webroot) => {
+      const { app } = testApp(webroot);
+
+      // Hono decodes the path before routing and compiles '/*' to '.*', which never matches \n,
+      // \r, U+2028 or U+2029; a multi-line say phrase used to fall through to a bare 404.
+      for (const [encoded, decoded] of [
+        ['%0A', '\n'],
+        ['%0D', '\r'],
+        ['%E2%80%A8', '\u2028'],
+        ['%E2%80%A9', '\u2029'],
+      ]) {
+        const response = await app.request(`/1.%20Kitchen/echo/Good${encoded}morning`);
+        assert.equal(response.status, 200, `${encoded} should route`);
+        assert.deepEqual(await response.json(), {
+          room: '1. Kitchen',
+          values: [`Good${decoded}morning`],
+          base: 'http://127.0.0.1:5005',
+        });
+      }
+    });
+  });
+
+  it('keeps routing paths that merely decode to a space or a percent', async () => {
+    await withWebroot(async (webroot) => {
+      const { app } = testApp(webroot);
+
+      const spaced = await app.request('/1.%20Kitchen/echo/a%20b');
+      assert.deepEqual(await spaced.json(), {
+        room: '1. Kitchen',
+        values: ['a b'],
+        base: 'http://127.0.0.1:5005',
+      });
+      const percent = await app.request('/1.%20Kitchen/echo/100%25');
+      assert.equal(((await percent.json()) as { values: string[] }).values[0], '100%');
+    });
+  });
+
   it('answers 503 before discovery and 405 for non-GET methods', async () => {
     await withWebroot(async (webroot) => {
       const { app } = testApp(webroot, { rooms: [] });

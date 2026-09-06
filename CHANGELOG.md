@@ -17,6 +17,9 @@ and 26. The vendored `sonos-discovery` library now lives in `src/discovery`.
   does not answer in time is 504; a command that needs a group coordinator on a member is 409;
   a missing favorite or playlist is 404. 500 now only means a bug in this server. Every failure
   is logged with method, path, status and the error details (see the README).
+- A phrase containing a newline (a multi-line announcement) is routed correctly. Hono decodes
+  the path before routing and its wildcard cannot match a line terminator, so such a request
+  previously fell through to a bare 404 without ever reaching the dispatcher.
 - CORS runs before authentication, so browser preflights succeed without credentials.
 - `/docs` (Swagger UI) is gone; `/` renders an index generated from the registered actions.
 - Text-to-speech is AWS Polly only. VoiceRSS, Microsoft, Google, macOS `say` and ElevenLabs
