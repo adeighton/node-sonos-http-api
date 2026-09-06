@@ -38,6 +38,18 @@ For development:
 | `npm run smoke:discovery` | Discovers the real Sonos system on the LAN and prints the zones   |
 | `npm run webhook-echo`  | Starts a receiver on port 5007 that prints every webhook it gets    |
 
+Deliberately held-back dependencies
+-----------------------------------
+
+Everything else tracks the latest release, and `npm audit` is clean. These three are pinned on
+purpose; a routine bump will break the build, so check here before raising the version.
+
+| Package | Held at | Why |
+| --- | --- | --- |
+| `xml-flow` | exactly `1.0.2` | From 1.0.3 an element carrying only attributes is collapsed to a bare string, so `.val` lookups on Sonos LastChange events return `undefined`. Verified against 1.0.4: four tests fail. |
+| `typescript` | `~6.0.3` | `typescript-eslint` declares `typescript >=4.8.4 <6.1.0`. TypeScript 7 is the Go-based compiler and has no JavaScript API for the linter to use. Recheck when typescript-eslint widens that range. |
+| `@types/node` | `^24` | Must match the oldest supported runtime, which `engines` sets to Node 24. The 26 types compile and pass the suite, but they would also let Node 26-only APIs through the typecheck and fail at runtime on the Raspberry Pi. Raise this only together with the `engines` floor. |
+
 Now you can control your system by invoking the following commands:
 
 	http://localhost:5005/zones
