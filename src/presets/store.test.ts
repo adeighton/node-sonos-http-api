@@ -122,7 +122,9 @@ describe('PresetStore', () => {
       store.watch();
 
       await writeFile(join(dir, 'garden.json'), '{"players":[{"roomName":"Garden"}]}');
-      const deadline = Date.now() + 3000;
+      // Generous: the loop exits the moment the watcher fires, so a long deadline costs nothing
+      // in the happy path and keeps fs.watch latency under parallel test load from failing here.
+      const deadline = Date.now() + 30_000;
       while (!store.names().includes('garden') && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }

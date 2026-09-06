@@ -3,8 +3,8 @@ import { Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
+import { TrieRouter } from 'hono/router/trie-router';
 import { streamSSE } from 'hono/streaming';
-import { getPath } from 'hono/utils/url';
 
 import type { ActionRegistry, ActionSystem, AnnouncerLike } from './actions/registry.ts';
 import type { Settings } from './config/schema.ts';
@@ -16,18 +16,6 @@ import type { Logger } from './logger.ts';
 import type { PresetStore } from './presets/store.ts';
 import type { ClipLibrary } from './tts/clips.ts';
 import type { TtsService } from './tts/index.ts';
-
-/**
- * Hono decodes the request path with `decodeURI` before routing, and a wildcard route compiles to
- * the pattern `.*`, which in JavaScript never matches a line terminator. A phrase containing an
- * encoded newline (any multi-line announcement) therefore missed every route and fell through to a
- * bare 404 before reaching the dispatcher. Keeping those four characters percent-encoded for
- * routing costs nothing: the dispatcher reads values from the raw url, and no file served from
- * `static/` has a line terminator in its name.
- */
-export function routablePath(request: Request): string {
-  return getPath(request).replace(/[\n\r\u2028\u2029]/g, encodeURIComponent);
-}
 
 export interface AppDeps {
   system: ActionSystem;
@@ -49,7 +37,14 @@ const PUBLIC_STATIC_PATHS = ['/tts/*', '/clips/*', '/sonos-icon.png'];
 
 export function createApp(deps: AppDeps): Hono {
   const { settings, logger } = deps;
-  const app = new Hono({ getPath: routablePath });
+  // TrieRouter, not the default SmartRouter. Hono decodes the path with `decodeURI` before
+  // routing, and SmartRouter settles on RegExpRouter, whose wildcard compiles to `.*` — a pattern
+  // that in JavaScript never matches a line terminator, so any multi-line say phrase missed every
+  // route and fell through to a bare 404. SmartRouter cannot recover: it chooses on the first
+  // request and only reconsiders if registration throws, which RegExpRouter does not do here.
+  // TrieRouter is the router Hono documents as supporting every pattern, and at this app's
+  // handful of routes and request rate its extra cost is immaterial.
+  const app = new Hono({ router: new TrieRouter() });
 
   app.use('*', async (c, next) => {
     await next();
