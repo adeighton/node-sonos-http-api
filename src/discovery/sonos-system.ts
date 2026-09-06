@@ -90,6 +90,11 @@ function isVisible(member: ZoneMemberData): boolean {
  * subscription feeds `topology-change`; every player then subscribes to its own events and the
  * listener routes NOTIFY bodies to the right Player by uuid.
  */
+/** The coordinator uuid encoded in a zone group id (`RINCON_...01400:3630835724`). */
+export function coordinatorFromGroupId(id: string | undefined): string {
+  return id?.split(':')[0] ?? '';
+}
+
 export class SonosSystem
   extends EventEmitter<SonosSystemEvents>
   implements PlayerSystem, PresetSystem
@@ -366,6 +371,15 @@ export class SonosSystem
     return player;
   }
 
+  /**
+   * Sonos names the coordinator twice: in the `Coordinator` attribute and again as the prefix of
+   * the group id (`<uuid>:<counter>`). While a group is being formed the attribute can arrive
+   * empty, and the id is then the only trustworthy source.
+   */
+  #coordinatorUuid(group: ZoneGroupData): string {
+    return group.$attrs.coordinator || coordinatorFromGroupId(group.$attrs.id);
+  }
+
   #topologyChange(zoneGroups: ZoneGroupData[]): void {
     const players: Player[] = [];
     const zones: Zone[] = [];
@@ -377,7 +391,7 @@ export class SonosSystem
       }
 
       const members = visibleMembers.map((member) => this.#getOrCreatePlayer(member));
-      const coordinatorUuid = group.$attrs.coordinator;
+      const coordinatorUuid = this.#coordinatorUuid(group);
       const coordinator =
         members.find((member) => member.uuid === coordinatorUuid) ??
         this.#players.get(coordinatorUuid) ??
@@ -387,9 +401,16 @@ export class SonosSystem
       }
 
       if (coordinator.uuid !== coordinatorUuid) {
+        // An arbitrary member is a poor coordinator: commands sent to it are refused with UPnP
+        // error 800, so say what happened rather than letting the group quietly misbehave.
         this.#logger.warn(
           { group: group.$attrs.id, coordinator: coordinatorUuid, fallback: coordinator.roomName },
           'group coordinator is not a visible player, using the first member instead',
+        );
+      } else if (coordinatorUuid !== group.$attrs.coordinator) {
+        this.#logger.debug(
+          { group: group.$attrs.id, coordinator: coordinator.roomName },
+          'group reported no coordinator, taking it from the group id',
         );
       }
 
@@ -398,7 +419,9 @@ export class SonosSystem
       }
 
       players.push(...members);
-      zones.push({ coordinator, members, uuid: coordinatorUuid, id: group.$attrs.id });
+      // The resolved coordinator, never the raw attribute: an empty uuid here would keep
+      // setGroupVolume and the announcement restore from finding the zone again.
+      zones.push({ coordinator, members, uuid: coordinator.uuid, id: group.$attrs.id });
     }
 
     const present = new Set(players.map((player) => player.uuid));

@@ -13,7 +13,7 @@ import type { HttpRequestOptions, HttpStreamResponse } from './http.ts';
 import type { NotificationEvents } from './notification-listener.ts';
 import { Player } from './player.ts';
 import { SOAP_ACTIONS } from './soap.ts';
-import { SonosSystem } from './sonos-system.ts';
+import { SonosSystem, coordinatorFromGroupId } from './sonos-system.ts';
 import type { SonosSystemDeps, SsdpLike } from './sonos-system.ts';
 import type { SsdpFound } from './ssdp.ts';
 import type { SubscriberEvents } from './subscriber.ts';
@@ -73,7 +73,7 @@ function setup(
   const createPlayer = mock.fn(
     (...args: Parameters<SonosSystemDeps['createPlayer'] & object>) => new Player(...args),
   );
-  const { logger, messages } = captureLogs();
+  const { logger, messages, entries } = captureLogs();
 
   const system = new SonosSystem(
     { household: options.household, discoveryHosts: options.discoveryHosts },
@@ -119,6 +119,7 @@ function setup(
     subscribers,
     createPlayer,
     messages,
+    entries,
     discover,
     topology,
     listener: () => {
@@ -291,6 +292,45 @@ describe('SonosSystem', () => {
       assert.equal(system.zones[0]?.coordinator.roomName, 'Den');
       assert.equal(system.getPlayer('Den')?.coordinator.roomName, 'Den');
       assert.ok(messages().some((message) => message.includes('not a visible player')));
+    });
+
+    it('takes the coordinator from the group id when the attribute arrives empty', async () => {
+      // Sonos reports Coordinator="" while a group is being formed; the id still names it.
+      const { system, discover, listener, messages, entries } = setup();
+      await discover();
+
+      listener().emit('topology', 'RINCON_X', [
+        {
+          $attrs: { coordinator: '', id: 'RINCON_FAMILY:3630835724' },
+          zonegroupmember: [
+            { uuid: 'RINCON_RUFF', location: 'http://10.0.0.1:1400/x', zonename: 'Ruff Playroom' },
+            { uuid: 'RINCON_FAMILY', location: 'http://10.0.0.2:1400/x', zonename: 'Family Room' },
+          ],
+        },
+      ]);
+
+      const zone = system.zones[0];
+      assert.equal(zone?.coordinator.roomName, 'Family Room');
+      assert.equal(zone?.uuid, 'RINCON_FAMILY', 'the zone carries the resolved coordinator uuid');
+      assert.equal(system.getPlayer('Ruff Playroom')?.coordinator.roomName, 'Family Room');
+      assert.equal(
+        messages().some((message) => message.includes('not a visible player')),
+        false,
+        'recovering from the id is not a warning',
+      );
+      assert.ok(
+        entries().some(
+          (entry) =>
+            entry.msg === 'group reported no coordinator, taking it from the group id' &&
+            entry.level === 20,
+        ),
+      );
+    });
+
+    it('reads the coordinator uuid out of a group id', () => {
+      assert.equal(coordinatorFromGroupId('RINCON_FAMILY:3630835724'), 'RINCON_FAMILY');
+      assert.equal(coordinatorFromGroupId('RINCON_FAMILY'), 'RINCON_FAMILY');
+      assert.equal(coordinatorFromGroupId(undefined), '');
     });
 
     it('looks players up by name (case-insensitively) and by uuid', async () => {
