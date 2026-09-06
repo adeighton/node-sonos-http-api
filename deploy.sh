@@ -33,6 +33,12 @@ remote() {
 
 echo "🚀 Deploying ${SERVICE_NAME} to ${REMOTE_HOST}..."
 
+echo "🔗 Checking the connection to ${REMOTE_HOST}..."
+if ! ssh -o ConnectTimeout=10 "${REMOTE_HOST}" true; then
+  echo "❌ Cannot reach ${REMOTE_HOST} over SSH. Check that the Pi is up and that mDNS resolves it."
+  exit 1
+fi
+
 echo "🔍 Checking Node.js on the remote system..."
 REMOTE_NODE_PATH=$(remote 'command -v node' || true)
 if [ -z "${REMOTE_NODE_PATH}" ]; then
