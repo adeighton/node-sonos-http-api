@@ -11,7 +11,14 @@ export interface AnnounceSystem {
 }
 
 export type AnnounceTarget =
-  { kind: 'player'; player: Player } | { kind: 'all' } | { kind: 'preset'; preset: Preset };
+  | { kind: 'player'; player: Player }
+  | { kind: 'all' }
+  | { kind: 'preset'; preset: Preset }
+  /** An ad-hoc set of rooms, the first one leading; a room's own volume wins over the spec's. */
+  | { kind: 'rooms'; rooms: Array<{ player: Player; volume?: number | undefined }> };
+
+/** `urgent` (a doorbell) interrupts a playing `normal` announcement, which resumes afterwards. */
+export type AnnouncementPriority = 'normal' | 'urgent';
 
 /** A clip the players can fetch: an absolute url and how long it plays. */
 export interface PreparedClip {
@@ -23,6 +30,8 @@ export interface PreparedClip {
 
 export interface AnnouncementSpec {
   target: AnnounceTarget;
+  /** Default `normal`. */
+  priority?: AnnouncementPriority | undefined;
   /** Volume for every player; a preset's own volumes apply when this is absent. */
   volume?: number | undefined;
   /** Pause the groups not taking part; defaults to the preset's setting (true when unset). */
@@ -35,7 +44,15 @@ export interface AnnouncementSpec {
 }
 
 export type AnnouncementState =
-  'queued' | 'starting' | 'playing' | 'restoring' | 'done' | 'failed' | 'cancelled';
+  | 'queued'
+  | 'starting'
+  | 'playing'
+  /** Paused by an urgent announcement; goes back to `playing` when that one is done. */
+  | 'interrupted'
+  | 'restoring'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
 
 /** How long each stage took, in milliseconds; a stage that never ran is absent. */
 export interface StageTimings {
@@ -52,7 +69,10 @@ export interface AnnouncementResult {
   id: string;
   state: 'done' | 'cancelled';
   source: string;
+  priority: AnnouncementPriority;
   rooms: string[];
+  /** How many times an urgent announcement paused this one. */
+  interruptions: number;
   /** Absent when the announcement was cancelled before its clip was needed. */
   clip?: PreparedClip | undefined;
   /** Whether every room was put back as it was; `partial` comes with `warnings`. */
@@ -74,6 +94,11 @@ export interface AnnouncementTransition {
   state: AnnouncementState;
   previousState: AnnouncementState;
   source: string;
+  priority: AnnouncementPriority;
   requestId?: string | undefined;
   at: number;
+  /** With `done` and `cancelled`. */
+  result?: AnnouncementResult | undefined;
+  /** With `failed`. */
+  error?: string | undefined;
 }

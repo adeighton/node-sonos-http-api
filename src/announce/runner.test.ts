@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 
 import type { Preset } from '../discovery/types.ts';
 import { BadRequestError } from '../http/errors.ts';
 import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
+import { fixturePath } from '../testing/fixtures.ts';
 import { FakeSystem } from '../testing/fake-system.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
 import { AnnouncementRunner } from './runner.ts';
@@ -35,6 +38,7 @@ async function setup() {
         logger,
         topologyTimeoutMs: 1000,
         restoreVerifyMs: 500,
+        resumeRewindMs: 1000,
         onTransition: (transition) => {
           states.push(transition.state);
           transitions.push(transition);
@@ -114,7 +118,10 @@ describe('AnnouncementRunner', () => {
     );
     assert.equal(result.id, 'a1');
     assert.equal(result.state, 'done');
+    assert.equal(result.priority, 'normal');
+    assert.equal(result.interruptions, 0);
     assert.deepEqual(result.rooms, ['Kitchen']);
+    assert.equal(transitions.at(-1)?.result, result, 'the final transition carries the result');
     assert.deepEqual(result.clip, CLIP);
     assert.equal(result.restore, 'ok');
     assert.deepEqual(result.warnings, []);
@@ -222,7 +229,7 @@ describe('AnnouncementRunner', () => {
   });
 
   it('rejects a bad target and restores nothing', async () => {
-    const { system, runner, states } = await setup();
+    const { system, runner, states, transitions } = await setup();
     await assert.rejects(
       settle(
         runner({
@@ -233,6 +240,7 @@ describe('AnnouncementRunner', () => {
     );
     assert.equal(system.appliedPresets.length, 0);
     assert.deepEqual(states, ['starting', 'failed']);
+    assert.match(transitions.at(-1)?.error ?? '', /Attic/);
   });
 
   it('reports a playback failure after restoring', async () => {
@@ -313,5 +321,149 @@ describe('AnnouncementRunner', () => {
     job.cancel();
     await flushPromises();
     assert.equal((await job.done).state, 'cancelled');
+  });
+
+  describe('interrupt and resume', () => {
+    const LONG = { uri: CLIP.uri, durationMs: 200_000 };
+
+    it('pauses, remembers the position and carries on a second earlier when resumed', async () => {
+      const { system, kitchen, runner, states } = await setup();
+      const job = runner({
+        target: { kind: 'player', player: kitchen.player },
+        prepare: () => Promise.resolve(LONG),
+      });
+      const pending = job.start();
+      await flushPromises();
+      assert.equal(job.state, 'playing');
+      kitchen.soap.calls.length = 0;
+      mock.timers.tick(5000);
+      kitchen.soap.queueResponse(Readable.from([])); // Pause
+      kitchen.soap.queueResponse(createReadStream(fixturePath('getpositioninfo.xml'))); // 2:22
+
+      const parked = job.interrupt();
+      await flushPromises();
+      assert.equal(await parked, 'interrupted');
+      assert.deepEqual(soapActions(kitchen.soap.calls), ['Pause', 'GetPositionInfo']);
+      assert.equal(kitchen.player.listenerCount('playback-state'), 0, 'the waiter is gone');
+      assert.equal(system.appliedPresets.length, 1, 'nothing restored while parked');
+
+      kitchen.soap.calls.length = 0;
+      job.resume();
+      await flushPromises();
+      assert.deepEqual(soapActions(kitchen.soap.calls), ['Seek', 'Play']);
+      assert.deepEqual(kitchen.soap.calls[0]?.values, { unit: 'REL_TIME', value: '00:02:21' });
+      assert.equal(job.state, 'playing');
+
+      kitchen.player.emit('playback-state', 'PLAYING');
+      kitchen.player.emit('playback-state', 'STOPPED');
+      const result = await settle(pending);
+      assert.equal(result.state, 'done');
+      assert.equal(result.interruptions, 1);
+      assert.deepEqual(states, [
+        'starting',
+        'playing',
+        'interrupted',
+        'playing',
+        'restoring',
+        'done',
+      ]);
+      assert.equal(result.timings.playMs, 5000, 'time spent playing, not parked');
+      assert.equal(system.appliedPresets.length, 2);
+    });
+
+    it('uses the clock when the player reports no position, and does not resume a finished clip', async () => {
+      const { kitchen, runner, states } = await setup();
+      const job = runner({
+        target: { kind: 'player', player: kitchen.player },
+        prepare: () => Promise.resolve({ uri: CLIP.uri, durationMs: 10_000 }),
+      });
+      const pending = job.start();
+      await flushPromises();
+      mock.timers.tick(9500);
+      kitchen.soap.calls.length = 0;
+
+      const parked = job.interrupt();
+      const result = await settle(pending);
+
+      assert.equal(await parked, 'ended');
+      assert.deepEqual(soapActions(kitchen.soap.calls), ['Pause', 'GetPositionInfo']);
+      assert.equal(result.state, 'done');
+      assert.equal(result.interruptions, 0);
+      assert.equal(states.includes('interrupted'), false);
+    });
+
+    it('re-forms the group and sets the clip again when the urgent one left things changed', async () => {
+      const { system, kitchen, office, runner } = await setup();
+      const preset = { players: [{ roomName: 'Kitchen' }, { roomName: 'Office' }] };
+      const grouped = [
+        {
+          uuid: 'RINCON_K',
+          id: 'x',
+          coordinator: kitchen.player,
+          members: [kitchen.player, office.player],
+        },
+      ];
+      const apart = system.zones;
+      system.zones = grouped;
+      const job = runner({
+        target: { kind: 'preset', preset },
+        prepare: () => Promise.resolve(LONG),
+      });
+      const pending = job.start();
+      await flushPromises();
+      assert.equal(job.state, 'playing');
+      mock.timers.tick(2000);
+      await job.interrupt();
+
+      // The doorbell moved things around: the rooms stand alone and Kitchen plays something else.
+      system.zones = apart;
+      await kitchen.player.setAVTransport('x-rincon-queue:RINCON_K#0');
+      kitchen.soap.calls.length = 0;
+      job.resume();
+      await flushPromises();
+      assert.equal(system.appliedPresets.length, 2, 'the group preset was applied again');
+      assert.equal(soapActions(kitchen.soap.calls).includes('Play'), false, 'waiting to regroup');
+      system.zones = grouped;
+      system.emit('topology-change', grouped);
+      await flushPromises();
+      assert.deepEqual(soapActions(kitchen.soap.calls), ['SetAVTransportURI', 'Seek', 'Play']);
+
+      job.cancel();
+      const result = await settle(pending);
+      assert.equal(result.state, 'cancelled');
+      assert.equal(result.interruptions, 1);
+    });
+
+    it('a cancel while interrupted takes effect on resume, so the urgent one is not disturbed', async () => {
+      const { system, kitchen, runner, states } = await setup();
+      const job = runner({
+        target: { kind: 'player', player: kitchen.player },
+        prepare: () => Promise.resolve(LONG),
+      });
+      const pending = job.start();
+      await flushPromises();
+      mock.timers.tick(1000);
+      await job.interrupt();
+      assert.equal(job.state, 'interrupted');
+
+      job.cancel();
+      await flushPromises();
+      assert.equal(job.state, 'interrupted', 'still parked');
+      assert.equal(system.appliedPresets.length, 1, 'no restore yet');
+
+      job.resume();
+      const result = await settle(pending);
+      assert.equal(result.state, 'cancelled');
+      assert.equal(system.appliedPresets.length, 2);
+      assert.deepEqual(states, ['starting', 'playing', 'interrupted', 'restoring', 'cancelled']);
+    });
+
+    it('interrupt is a no-op unless the announcement is playing', async () => {
+      const { kitchen, runner } = await setup();
+      const job = runner({ target: { kind: 'player', player: kitchen.player } });
+      assert.equal(await job.interrupt(), 'ended');
+      job.cancel();
+      assert.equal((await job.done).state, 'cancelled');
+    });
   });
 });

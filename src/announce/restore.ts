@@ -9,22 +9,6 @@ import type { AnnouncementPlan } from './plan.ts';
 import type { AnnounceSystem } from './types.ts';
 import { waitForTopology } from './wait.ts';
 
-const RADIO_OR_LINE_IN_PREFIXES = [
-  'x-sonosapi-stream:',
-  'x-sonosapi-radio:',
-  'pndrradio:',
-  'x-sonosapi-hls:',
-  'x-rincon-stream:',
-  'x-sonos-htastream:',
-  'x-sonosprog-http:',
-  'x-rincon-mp3radio:',
-];
-
-/** Streams have no track position to restore. */
-export function isRadioOrLineIn(uri: string): boolean {
-  return RADIO_OR_LINE_IN_PREFIXES.some((prefix) => uri.startsWith(prefix));
-}
-
 /**
  * Transports a player refuses to be set back to: nothing at all (an idle player after boot) and
  * sessions pushed by another app, such as AirPlay, Spotify Connect or a voice assistant
@@ -34,17 +18,13 @@ export function isRestorableUri(uri: string): boolean {
   return uri !== '' && !uri.startsWith('x-sonos-vli:');
 }
 
-/** A player following another player's group (`x-rincon:<uuid>`) cannot seek either. */
-export function isGroupLink(uri: string): boolean {
-  return uri.startsWith('x-rincon:');
-}
-
 /**
- * Whether a queue position is worth restoring: not for streams or group links, and not when the
- * queue was empty (Sonos reports track 0), since seeking there only fails.
+ * Whether a queue position is worth restoring: only the Sonos queue transport has one (streams,
+ * line-in, group links and single urls do not), and not when the queue was empty (Sonos reports
+ * track 0), since seeking there only fails.
  */
 export function hasQueuePosition(uri: string, trackNo: number): boolean {
-  return !isRadioOrLineIn(uri) && !isGroupLink(uri) && trackNo > 0;
+  return uri.startsWith('x-rincon-queue:') && trackNo > 0;
 }
 
 /**

@@ -119,6 +119,40 @@ describe('planAnnouncement', () => {
     ]);
   });
 
+  it('plans ad-hoc rooms, the first one leading, each with its own volume over the default', () => {
+    const { system, kitchen, office } = house();
+
+    const plan = planAnnouncement(system, {
+      target: {
+        kind: 'rooms',
+        rooms: [{ player: office, volume: 25 }, { player: kitchen }],
+      },
+      volume: 40,
+    });
+
+    assert.equal(plan.coordinator, office);
+    assert.deepEqual(plan.preset, {
+      players: [
+        { roomName: 'Office', volume: 25 },
+        { roomName: 'Kitchen', volume: 40 },
+      ],
+      playMode: { repeat: 'none' },
+      pauseOthers: false,
+      state: 'STOPPED',
+    });
+    assert.equal(plan.expectedTopology(system.zones), false);
+    assert.equal(
+      plan.expectedTopology([
+        { uuid: 'RINCON_O', id: 'x', coordinator: office, members: [kitchen, office] },
+      ]),
+      true,
+    );
+    assert.throws(
+      () => planAnnouncement(system, { target: { kind: 'rooms', rooms: [] } }),
+      BadRequestError,
+    );
+  });
+
   it('rejects a preset whose first room is unknown or missing', () => {
     const { system } = house();
     assert.throws(

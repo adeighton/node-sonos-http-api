@@ -42,12 +42,15 @@ export const settingsSchema = z.object({
       restoreVerifyMs: z.coerce.number().int().min(0).default(3000),
       /** At shutdown, how long to give the current announcement to stop and restore its rooms. */
       shutdownDrainMs: z.coerce.number().int().min(0).default(15_000),
+      /** How far an interrupted announcement rewinds before it carries on. */
+      resumeRewindMs: z.coerce.number().int().min(0).default(1000),
     })
     .default({
       maxQueued: 10,
       topologyTimeoutMs: 10_000,
       restoreVerifyMs: 3000,
       shutdownDrainMs: 15_000,
+      resumeRewindMs: 1000,
     }),
   cacheDir: z.string().min(1).default('cache'),
   webroot: z.string().min(1).default('static'),

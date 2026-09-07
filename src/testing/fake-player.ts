@@ -62,11 +62,4 @@ export function fakePresetPlayer(options: FakePresetPlayerOptions): FakePresetPl
   };
 }
 
-/** A command that stays pending until released, to observe what runs concurrently. */
-export function deferred<T = void>() {
-  let release: (value: T) => void = () => {};
-  const promise = new Promise<T>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release: (value: T) => release(value) };
-}
+export { deferred } from '../util/deferred.ts';

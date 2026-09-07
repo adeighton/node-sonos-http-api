@@ -11,14 +11,7 @@ import { FakeSystem } from '../testing/fake-system.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
 import type { TestPlayer } from '../testing/test-player.ts';
 import { planAnnouncement } from './plan.ts';
-import {
-  captureRestorePlan,
-  hasQueuePosition,
-  isGroupLink,
-  isRadioOrLineIn,
-  isRestorableUri,
-  runRestore,
-} from './restore.ts';
+import { captureRestorePlan, hasQueuePosition, isRestorableUri, runRestore } from './restore.ts';
 
 async function playing(
   system: FakeSystem,
@@ -77,18 +70,16 @@ async function settle<T>(promise: Promise<T>, stepMs = 500, maxSteps = 40): Prom
 }
 
 describe('uri classification', () => {
-  it('recognizes streams, group links, app sessions and queue positions', () => {
-    assert.equal(isRadioOrLineIn('x-sonosapi-stream:s1'), true);
-    assert.equal(isRadioOrLineIn('x-rincon-stream:RINCON_1'), true);
-    assert.equal(isRadioOrLineIn('x-rincon-queue:RINCON_1#0'), false);
+  it('recognizes app sessions and queue positions', () => {
     assert.equal(isRestorableUri(''), false);
     assert.equal(isRestorableUri('x-sonos-vli:RINCON_1:2,airplay:abc'), false);
     assert.equal(isRestorableUri('x-rincon-queue:RINCON_1#0'), true);
-    assert.equal(isGroupLink('x-rincon:RINCON_1'), true);
+    assert.equal(isRestorableUri('x-sonosapi-stream:s1'), true);
     assert.equal(hasQueuePosition('x-rincon-queue:RINCON_1#0', 3), true);
     assert.equal(hasQueuePosition('x-rincon-queue:RINCON_1#0', 0), false, 'empty queue');
     assert.equal(hasQueuePosition('x-rincon:RINCON_1', 1), false, 'group link');
     assert.equal(hasQueuePosition('x-sonosapi-stream:s1', 1), false, 'stream');
+    assert.equal(hasQueuePosition('http://192.168.2.10:5005/tts/x.mp3', 1), false, 'a clip url');
   });
 });
 

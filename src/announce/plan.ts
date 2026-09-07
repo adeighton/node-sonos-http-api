@@ -73,6 +73,29 @@ export function planAnnouncement(
         expectedTopology: groupedExactly(coordinator, players),
       };
     }
+    case 'rooms': {
+      const coordinator = target.rooms[0]?.player;
+      if (!coordinator) {
+        throw new BadRequestError('At least one room is required');
+      }
+
+      return {
+        coordinator,
+        preset: {
+          players: target.rooms.map(({ player, volume }) => ({
+            roomName: player.roomName,
+            volume: volume ?? spec.volume,
+          })),
+          playMode: { repeat: 'none' },
+          pauseOthers: spec.pauseOthers ?? false,
+          state: 'STOPPED',
+        },
+        expectedTopology: groupedExactly(
+          coordinator,
+          target.rooms.map((room) => room.player),
+        ),
+      };
+    }
     case 'preset': {
       const { preset } = target;
       const players = preset.players.map((info) => findPlayer(system, info.roomName));

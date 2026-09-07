@@ -21,6 +21,8 @@ export interface SchedulerOptions {
   topologyTimeoutMs?: number | undefined;
   /** How long a restore waits for the topology to show the groups back. Default 3 s. */
   restoreVerifyMs?: number | undefined;
+  /** How far an interrupted announcement rewinds before it carries on. Default 1 s. */
+  resumeRewindMs?: number | undefined;
 }
 
 export interface SchedulerEvents {
@@ -31,13 +33,17 @@ export interface SchedulerEvents {
 const RETRY_AFTER_SECONDS = '10';
 
 /**
- * Plays announcements one at a time, in the order they arrive, so their backups never capture
- * each other's clips. Every state change is published as a `transition` event.
+ * Plays announcements one at a time so their backups never capture each other's clips: urgent
+ * ones first, otherwise in the order they arrive. An urgent announcement interrupts a playing
+ * normal one, which resumes once every urgent one is done. Every state change is published as a
+ * `transition` event.
  */
 export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
   readonly #options: Required<Omit<SchedulerOptions, 'logger'>> & { logger: Logger };
   readonly #queue: AnnouncementRunner[] = [];
   #current: AnnouncementRunner | undefined;
+  /** A normal announcement parked by an urgent one, waiting to resume. */
+  #suspended: AnnouncementRunner | undefined;
   #draining = false;
 
   constructor(options: SchedulerOptions) {
@@ -48,12 +54,13 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
       maxQueued: options.maxQueued ?? 10,
       topologyTimeoutMs: options.topologyTimeoutMs ?? 10_000,
       restoreVerifyMs: options.restoreVerifyMs ?? 3000,
+      resumeRewindMs: options.resumeRewindMs ?? 1000,
     };
   }
 
-  /** Announcements waiting behind the current one. */
+  /** Announcements waiting behind the current one (an interrupted one included). */
   get queued(): number {
-    return this.#queue.length;
+    return this.#queue.length + (this.#suspended ? 1 : 0);
   }
 
   /** The id of the announcement in progress, if any. */
@@ -81,21 +88,39 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
       logger: this.#options.logger.child({
         announcementId: id,
         source: spec.source,
+        priority: spec.priority ?? 'normal',
         requestId: spec.requestId,
       }),
       topologyTimeoutMs: this.#options.topologyTimeoutMs,
       restoreVerifyMs: this.#options.restoreVerifyMs,
+      resumeRewindMs: this.#options.resumeRewindMs,
       onTransition: (transition) => {
         if (transition.state === 'cancelled') {
           this.#remove(runner);
         }
 
         this.emit('transition', transition);
+        if (transition.state === 'playing') {
+          this.#preemptIfUrgentWaits();
+        }
       },
     });
-    this.#queue.push(runner);
+
+    if (spec.priority === 'urgent') {
+      const behindUrgent = this.#queue.findLastIndex((r) => r.spec.priority === 'urgent') + 1;
+      this.#queue.splice(behindUrgent, 0, runner);
+    } else {
+      this.#queue.push(runner);
+    }
+
     this.#pump();
+    this.#preemptIfUrgentWaits();
     return runner;
+  }
+
+  /** A queued, playing or interrupted announcement by id. */
+  find(id: string): AnnouncementHandle | undefined {
+    return [this.#current, this.#suspended, ...this.#queue].find((runner) => runner?.id === id);
   }
 
   /** Refuses new announcements and drops the waiting ones; the current one keeps playing. */
@@ -107,19 +132,22 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
   }
 
   /**
-   * Shuts down and stops the current announcement so its rooms are restored before the process
-   * exits; resolves when that is done or after `timeoutMs`, whichever comes first.
+   * Shuts down and stops the current announcement (and one it interrupted) so their rooms are
+   * restored before the process exits; resolves when that is done or after `timeoutMs`.
    */
   async drain(timeoutMs: number): Promise<void> {
     this.beginShutdown();
-    const current = this.#current;
-    if (!current) {
+    const active = [this.#current, this.#suspended].filter((r) => r !== undefined);
+    if (active.length === 0) {
       return;
     }
 
-    current.cancel();
+    for (const runner of active) {
+      runner.cancel();
+    }
+
     await Promise.race([
-      current.done.catch(() => undefined),
+      Promise.allSettled(active.map((runner) => runner.done)),
       new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
     ]);
   }
@@ -131,22 +159,58 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
     }
   }
 
+  /** An urgent announcement at the head of the queue takes the speakers from a playing normal one. */
+  #preemptIfUrgentWaits(): void {
+    const victim = this.#current;
+    if (
+      !victim ||
+      this.#suspended ||
+      victim.spec.priority === 'urgent' ||
+      victim.state !== 'playing' ||
+      this.#queue[0]?.spec.priority !== 'urgent'
+    ) {
+      return;
+    }
+
+    void victim.interrupt().then((outcome) => {
+      if (outcome === 'interrupted' && this.#current === victim) {
+        this.#suspended = victim;
+        this.#current = undefined;
+        this.#pump();
+      }
+    });
+  }
+
   #pump(): void {
     if (this.#current) {
       return;
     }
 
-    const next = this.#queue.shift();
-    if (!next) {
-      return;
+    if (this.#queue[0]?.spec.priority === 'urgent') {
+      this.#run(this.#queue.shift() as AnnouncementRunner);
+    } else if (this.#suspended) {
+      const resumed = this.#suspended;
+      this.#suspended = undefined;
+      this.#current = resumed;
+      resumed.resume();
+    } else {
+      const next = this.#queue.shift();
+      if (next) {
+        this.#run(next);
+      }
     }
+  }
 
-    this.#current = next;
-    void next
+  #run(runner: AnnouncementRunner): void {
+    this.#current = runner;
+    void runner
       .start()
       .catch(() => undefined)
       .then(() => {
-        this.#current = undefined;
+        if (this.#current === runner) {
+          this.#current = undefined;
+        }
+
         this.#pump();
       });
   }

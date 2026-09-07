@@ -5,6 +5,7 @@ import type { Preset } from '../discovery/types.ts';
 import { ServiceUnavailableError } from '../http/errors.ts';
 import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
+import { deferred } from '../testing/fake-player.ts';
 import { FakeSystem } from '../testing/fake-system.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
 import { AnnouncementScheduler } from './scheduler.ts';
@@ -34,6 +35,7 @@ async function setup(options: { maxQueued?: number } = {}) {
     maxQueued: options.maxQueued ?? 10,
     topologyTimeoutMs: 1000,
     restoreVerifyMs: 500,
+    resumeRewindMs: 1000,
   });
   scheduler.on('transition', (transition) => transitions.push(transition));
   const spec = (
@@ -50,7 +52,7 @@ async function setup(options: { maxQueued?: number } = {}) {
 }
 
 /** Ticks mock timers until every promise has settled. */
-async function settleAll(promises: Array<Promise<unknown>>, stepMs = 500, maxSteps = 60) {
+async function settleAll(promises: Array<Promise<unknown>>, stepMs = 500, maxSteps = 120) {
   let pending = promises.length;
   for (const promise of promises) {
     promise.then(
@@ -210,5 +212,108 @@ describe('AnnouncementScheduler', () => {
     assert.equal(done?.announcementId, handle.id);
     assert.equal(done?.source, 'test');
     assert.equal(done?.requestId, 'req-1');
+  });
+
+  describe('priority', () => {
+    const LONG = { uri: CLIP.uri, durationMs: 20_000 };
+    type Spec = Awaited<ReturnType<typeof setup>>['spec'];
+    const briefing = (spec: Spec) =>
+      spec('Kitchen', { source: 'briefing', prepare: () => Promise.resolve(LONG) });
+    const doorbell = (spec: Spec) => spec('Office', { source: 'doorbell', priority: 'urgent' });
+
+    it('an urgent announcement interrupts a playing normal one, which resumes when it is done', async () => {
+      const { scheduler, spec, order, transitions, kitchen } = await setup();
+      const normal = scheduler.submit(briefing(spec));
+      await flushPromises();
+      mock.timers.tick(3000);
+      kitchen.soap.calls.length = 0;
+
+      const urgent = scheduler.submit(doorbell(spec));
+      await flushPromises();
+      assert.equal(scheduler.current, urgent.id, 'the doorbell has the speakers');
+      assert.equal(scheduler.queued, 1, 'the briefing waits');
+      await settleAll([normal.done, urgent.done]);
+
+      assert.deepEqual(order, ['play:Kitchen', 'play:Office', 'restore:Office', 'restore:Kitchen']);
+      const actions = kitchen.soap.calls.map((c) => c.action.slice(c.action.indexOf('#') + 1));
+      assert.deepEqual(actions, ['Pause', 'GetPositionInfo', 'Seek', 'Play']);
+      assert.deepEqual(
+        transitions.filter((t) => t.id === normal.id).map((t) => t.state),
+        ['starting', 'playing', 'interrupted', 'playing', 'restoring', 'done'],
+      );
+      assert.equal((await normal.done).interruptions, 1);
+      assert.equal((await urgent.done).priority, 'urgent');
+    });
+
+    it('an urgent one that arrives while the normal one is still starting waits for it to play', async () => {
+      const { scheduler, spec, order, system } = await setup();
+      const gate = deferred();
+      system.applyPreset.mock.mockImplementation(async (preset: Preset) => {
+        if (preset.players[0]?.roomName === 'Kitchen' && preset.uri === undefined) {
+          await gate.promise;
+        }
+        order.push(
+          `${preset.uri === undefined && preset.state === 'STOPPED' ? 'play' : 'restore'}:${preset.players[0]?.roomName ?? ''}`,
+        );
+      });
+      const normal = scheduler.submit(briefing(spec));
+      const urgent = scheduler.submit(doorbell(spec));
+      await flushPromises();
+      assert.equal(scheduler.current, normal.id, 'not interrupted while starting');
+
+      gate.release();
+      await settleAll([normal.done, urgent.done]);
+      assert.deepEqual(order, ['play:Kitchen', 'play:Office', 'restore:Office', 'restore:Kitchen']);
+      assert.equal((await normal.done).interruptions, 1);
+    });
+
+    it('urgent never interrupts urgent, and a second urgent goes ahead of the resume', async () => {
+      const { scheduler, spec, order } = await setup();
+      const normal = scheduler.submit(briefing(spec));
+      await flushPromises();
+      mock.timers.tick(1000);
+      const first = scheduler.submit(doorbell(spec));
+      await flushPromises();
+      await flushPromises();
+      assert.equal(scheduler.current, first.id);
+      const second = scheduler.submit(doorbell(spec));
+      await flushPromises();
+      assert.equal(scheduler.current, first.id, 'the first doorbell keeps playing');
+
+      await settleAll([normal.done, first.done, second.done]);
+      assert.deepEqual(order, [
+        'play:Kitchen',
+        'play:Office',
+        'restore:Office',
+        'play:Office',
+        'restore:Office',
+        'restore:Kitchen',
+      ]);
+      assert.equal((await normal.done).interruptions, 1, 'parked once, resumed after both');
+    });
+
+    it('find returns waiting, playing and interrupted announcements, and drain restores them all', async () => {
+      const { scheduler, spec, order } = await setup();
+      const normal = scheduler.submit(briefing(spec));
+      const waiting = scheduler.submit(spec('Kitchen'));
+      await flushPromises();
+      mock.timers.tick(1000);
+      const urgent = scheduler.submit(doorbell(spec));
+      await flushPromises();
+      await flushPromises();
+      assert.equal(scheduler.find(normal.id)?.id, normal.id, 'interrupted');
+      assert.equal(scheduler.find(urgent.id)?.id, urgent.id, 'playing');
+      assert.equal(scheduler.find(waiting.id)?.id, waiting.id, 'queued');
+      assert.equal(scheduler.find('nope'), undefined);
+      assert.equal(scheduler.queued, 2);
+
+      const drained = scheduler.drain(10_000);
+      await settleAll([drained, normal.done, urgent.done, waiting.done]);
+      assert.equal((await waiting.done).state, 'cancelled');
+      assert.equal((await urgent.done).state, 'cancelled');
+      assert.equal((await normal.done).state, 'cancelled');
+      assert.deepEqual(order, ['play:Kitchen', 'play:Office', 'restore:Office', 'restore:Kitchen']);
+      assert.equal(scheduler.find(normal.id), undefined);
+    });
   });
 });
