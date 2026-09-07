@@ -34,7 +34,11 @@ describe('createClipLibrary', () => {
         measureDuration: () => Promise.resolve(42),
       });
 
-      assert.deepEqual(await library.get('a.mp3'), { uri: '/sounds/a.mp3', durationMs: 42 });
+      assert.deepEqual(await library.get('a.mp3'), {
+        uri: '/sounds/a.mp3',
+        durationMs: 42,
+        cached: true,
+      });
     });
   });
 });

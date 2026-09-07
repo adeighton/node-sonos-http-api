@@ -5,9 +5,16 @@ import { ServiceUnavailableError } from '../http/errors.ts';
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
 import { ClipCache } from './cache.ts';
-import { DEFAULT_POLLY_VOICE, createPollyProvider } from './polly.ts';
+import { DurationIndex } from './duration-index.ts';
+import {
+  DEFAULT_POLLY_VOICE,
+  createPollyClient,
+  createPollyProvider,
+  toHttpError,
+} from './polly.ts';
 import type { PollyClientLike } from './polly.ts';
 import type { Clip, TtsProvider, TtsRequest } from './provider.ts';
+import { VoiceCatalog } from './voices.ts';
 
 export type { Clip, TtsProvider, TtsRequest } from './provider.ts';
 
@@ -30,10 +37,15 @@ export const NO_TTS_MESSAGE =
 /** Builds the provider chain from settings; today that is Amazon Polly or nothing. */
 export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}): TtsService {
   const logger = deps.logger ?? silentLogger;
+  const dir = join(settings.webroot, 'tts');
   const cache = new ClipCache({
-    dir: join(settings.webroot, 'tts'),
+    dir,
     logger,
-    measureDuration: deps.measureDuration,
+    durations: new DurationIndex({
+      file: join(dir, 'durations.json'),
+      measure: deps.measureDuration,
+      logger,
+    }),
   });
 
   const providers: TtsProvider[] = [];
@@ -45,15 +57,19 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
             secretAccessKey: settings.aws.credentials.secretAccessKey,
           }
         : undefined;
+    const client =
+      deps.pollyClient ??
+      createPollyClient({ region: settings.aws.credentials?.region, credentials });
     providers.push(
       createPollyProvider(
         {
           voice: settings.aws.voice ?? settings.aws.name ?? DEFAULT_POLLY_VOICE,
           engine: settings.aws.engine,
-          region: settings.aws.credentials?.region,
-          credentials,
+          maxConcurrency: settings.aws.maxConcurrency,
+          timeoutMs: settings.aws.timeoutMs,
+          chunkTargetChars: settings.aws.chunkTargetChars,
         },
-        { cache, client: deps.pollyClient },
+        { cache, client, catalog: new VoiceCatalog({ client, logger }) },
       ),
     );
   }
@@ -71,7 +87,11 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
         throw new ServiceUnavailableError(NO_TTS_MESSAGE);
       }
 
-      return provider.synthesize(request);
+      try {
+        return await provider.synthesize(request);
+      } catch (error) {
+        throw toHttpError(error);
+      }
     },
   };
 }

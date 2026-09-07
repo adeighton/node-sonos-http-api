@@ -12,26 +12,33 @@ import {
 
 export type HttpStatus = ContentfulStatusCode;
 
+export interface HttpErrorOptions extends ErrorOptions {
+  /** Response headers to send with the error, e.g. `Retry-After`. */
+  headers?: Readonly<Record<string, string>>;
+}
+
 /** An error that maps to a specific HTTP status code. */
 export class HttpError extends Error {
   readonly status: HttpStatus;
+  readonly headers: Readonly<Record<string, string>> | undefined;
 
-  constructor(status: HttpStatus, message: string, options?: ErrorOptions) {
+  constructor(status: HttpStatus, message: string, options?: HttpErrorOptions) {
     super(message, options);
     this.name = 'HttpError';
     this.status = status;
+    this.headers = options?.headers;
   }
 }
 
 export class BadRequestError extends HttpError {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: HttpErrorOptions) {
     super(400, message, options);
     this.name = 'BadRequestError';
   }
 }
 
 export class NotFoundError extends HttpError {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: HttpErrorOptions) {
     super(404, message, options);
     this.name = 'NotFoundError';
   }
@@ -39,16 +46,24 @@ export class NotFoundError extends HttpError {
 
 /** The player (or an upstream music service) answered, but refused or failed the request. */
 export class BadGatewayError extends HttpError {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: HttpErrorOptions) {
     super(502, message, options);
     this.name = 'BadGatewayError';
   }
 }
 
 export class ServiceUnavailableError extends HttpError {
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(message: string, options?: HttpErrorOptions) {
     super(503, message, options);
     this.name = 'ServiceUnavailableError';
+  }
+}
+
+/** The player or an upstream service did not answer in time. */
+export class GatewayTimeoutError extends HttpError {
+  constructor(message: string, options?: HttpErrorOptions) {
+    super(504, message, options);
+    this.name = 'GatewayTimeoutError';
   }
 }
 

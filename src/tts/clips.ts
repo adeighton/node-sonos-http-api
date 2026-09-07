@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { BadRequestError, NotFoundError } from '../http/errors.ts';
-import { fileDurationMs } from './duration.ts';
+import { DurationIndex } from './duration-index.ts';
 import type { Clip } from './provider.ts';
 
 /** Pre-recorded clips (doorbells, chimes) under `static/clips`. */
@@ -15,11 +15,19 @@ export interface ClipLibraryOptions {
   /** URL prefix players use to fetch them. Default `/clips`. */
   publicPath?: string;
   measureDuration?: (file: string) => Promise<number>;
+  /** Remembered durations; defaults to `durations.json` inside `dir`. */
+  durations?: DurationIndex;
 }
 
 export function createClipLibrary(options: ClipLibraryOptions): ClipLibrary {
   const publicPath = options.publicPath ?? '/clips';
-  const measureDuration = options.measureDuration ?? fileDurationMs;
+  const durations =
+    options.durations ??
+    new DurationIndex({
+      file: join(options.dir, 'durations.json'),
+      measure: options.measureDuration,
+    });
+  const ready = durations.load();
 
   return {
     async get(name) {
@@ -36,9 +44,11 @@ export function createClipLibrary(options: ClipLibraryOptions): ClipLibrary {
         throw new NotFoundError(`No clip named '${name}' in ${options.dir}`);
       }
 
+      await ready;
       return {
         uri: `${publicPath}/${encodeURIComponent(name)}`,
-        durationMs: await measureDuration(file),
+        durationMs: await durations.resolve(file, name),
+        cached: true,
       };
     },
   };

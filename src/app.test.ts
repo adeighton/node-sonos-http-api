@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 
 import { createApp } from './app.ts';
 import { SoapFaultError } from './discovery/errors.ts';
+import { ServiceUnavailableError } from './http/errors.ts';
 import type { AppDeps } from './app.ts';
 import { ActionRegistry } from './actions/registry.ts';
 import { settingsSchema } from './config/schema.ts';
@@ -61,6 +62,12 @@ function testApp(webroot: string, options: TestAppOptions = {}) {
     usage: '/loud',
     description: '',
   });
+  registry.register(
+    'busy',
+    () =>
+      Promise.reject(new ServiceUnavailableError('try later', { headers: { 'Retry-After': '2' } })),
+    { usage: '/busy', description: '' },
+  );
 
   const { logger, entries } = captureLogs();
   const hub = new EventHub({ logger });
@@ -206,6 +213,32 @@ describe('createApp', () => {
       });
       const percent = await app.request('/1.%20Kitchen/echo/100%25');
       assert.equal(((await percent.json()) as { values: string[] }).values[0], '100%');
+    });
+  });
+
+  it('forwards the headers an error asks for, such as Retry-After', async () => {
+    await withWebroot(async (webroot) => {
+      const { app } = testApp(webroot);
+
+      const busy = await app.request('/busy');
+
+      assert.equal(busy.status, 503);
+      assert.equal(busy.headers.get('retry-after'), '2');
+      assert.deepEqual(await busy.json(), { status: 'error', error: 'try later' });
+    });
+  });
+
+  it('lets players cache generated speech forever and clips for an hour', async () => {
+    await withWebroot(async (webroot) => {
+      const { app } = testApp(webroot);
+
+      const speech = await app.request('/tts/hello.mp3');
+      assert.equal(speech.status, 200);
+      assert.equal(speech.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+
+      const clip = await app.request('/clips/ding.mp3');
+      assert.equal(clip.status, 200);
+      assert.equal(clip.headers.get('cache-control'), 'public, max-age=3600');
     });
   });
 

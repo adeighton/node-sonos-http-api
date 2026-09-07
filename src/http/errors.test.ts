@@ -33,6 +33,18 @@ describe('http errors', () => {
     assert.ok(new BadRequestError('x') instanceof HttpError);
   });
 
+  it('can carry response headers, such as Retry-After', () => {
+    const busy = new ServiceUnavailableError('later', { headers: { 'Retry-After': '2' } });
+    assert.deepEqual(busy.headers, { 'Retry-After': '2' });
+    assert.equal(new ServiceUnavailableError('later').headers, undefined);
+    const withCause = new HttpError(502, 'upstream', {
+      cause: new Error('x'),
+      headers: { A: 'b' },
+    });
+    assert.equal((withCause.cause as Error).message, 'x');
+    assert.deepEqual(withCause.headers, { A: 'b' });
+  });
+
   it('map thrown values to status codes', () => {
     assert.equal(statusForError(new NotFoundError('x')), 404);
     assert.equal(statusForError(new ArgumentError('x')), 400);

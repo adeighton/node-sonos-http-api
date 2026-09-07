@@ -9,7 +9,7 @@ import { streamSSE } from 'hono/streaming';
 import type { ActionRegistry, ActionSystem, AnnouncerLike } from './actions/registry.ts';
 import type { Settings } from './config/schema.ts';
 import { decodePathSegments, resolveRequest, runAction } from './http/dispatch.ts';
-import { errorBody, statusForError } from './http/errors.ts';
+import { HttpError, errorBody, statusForError } from './http/errors.ts';
 import type { EventHub } from './http/events.ts';
 import { renderIndexHtml } from './http/index-page.ts';
 import type { Logger } from './logger.ts';
@@ -54,8 +54,19 @@ export function createApp(deps: AppDeps): Hono {
     );
   });
 
-  // Media the Sonos players fetch: deliberately outside basic auth.
+  // Media the Sonos players fetch: deliberately outside basic auth. Generated speech files are
+  // content-addressed, so they can be cached forever; clips are stable but replaceable. The
+  // header is applied after serveStatic has built its response (its onFound hook runs too late
+  // for c.header to reach the response).
   for (const path of PUBLIC_STATIC_PATHS) {
+    const cacheControl =
+      path === '/tts/*' ? 'public, max-age=31536000, immutable' : 'public, max-age=3600';
+    app.use(path, async (c, next) => {
+      await next();
+      if (c.res.status === 200 || c.res.status === 206) {
+        c.res.headers.set('Cache-Control', cacheControl);
+      }
+    });
     app.use(path, serveStatic({ root: settings.webroot }));
   }
   app.get('/tts/*', (c) => c.json(errorBody(new Error('No such clip')), 404));
@@ -137,7 +148,8 @@ export function createApp(deps: AppDeps): Hono {
       { err: error, method: c.req.method, path: c.req.path, status },
       'request failed',
     );
-    return c.json(errorBody(error), status);
+    const headers = error instanceof HttpError ? error.headers : undefined;
+    return c.json(errorBody(error), status, headers);
   });
 
   return app;
