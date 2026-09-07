@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { Readable } from 'node:stream';
+import { describe, it, mock } from 'node:test';
 
+import { SoapFaultError } from '../discovery/errors.ts';
 import { SOAP_ACTIONS } from '../discovery/soap.ts';
 import { BadRequestError } from '../http/errors.ts';
 import { createActionContext } from '../testing/action-context.ts';
+import { flushPromises } from '../testing/async.ts';
 import { registerBbcSoundsActions } from './bbc-sounds.ts';
 import { ActionRegistry } from './registry.ts';
 import { registerTuneInActions } from './tunein.ts';
@@ -33,6 +36,54 @@ describe('radio actions', () => {
     assert.ok(String(kitchen.soap.calls[0]?.values?.metadata).includes('SA_RINCON65031_'));
     await assert.rejects(tunein(context, ['pause', 's1']), BadRequestError);
     await assert.rejects(tunein(context, ['play']), BadRequestError);
+  });
+
+  it('retries play once when the player is not ready right after the transport change', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const registry = new ActionRegistry();
+      registerTuneInActions(registry);
+      registerBbcSoundsActions(registry);
+      const { context, rooms, system } = createActionContext();
+      system.availableServices = { TuneIn: { id: 254, capabilities: 0, type: 65031 } };
+      const kitchen = rooms.get('Kitchen');
+      assert.ok(kitchen);
+
+      for (const [action, station] of [
+        ['tunein', 's12345'],
+        ['bbcsounds', 'bbc_radio_two'],
+      ] as const) {
+        kitchen.soap.calls.length = 0;
+        kitchen.soap.queueResponse(Readable.from([])); // SetAVTransportURI
+        kitchen.soap.queueFailure(
+          new SoapFaultError('http://p', 'Play', 701, 'Transition not available', ''),
+        );
+
+        const pending = registry.get(action)?.(context, ['play', station]);
+        await flushPromises();
+        mock.timers.tick(1000);
+        await flushPromises();
+        await pending;
+
+        assert.deepEqual(
+          kitchen.soap.calls.map((c) => c.action),
+          [SOAP_ACTIONS.SetAVTransportURI, SOAP_ACTIONS.Play, SOAP_ACTIONS.Play],
+          `${action}: play is retried once`,
+        );
+      }
+
+      // Any other refusal is reported straight away.
+      kitchen.soap.calls.length = 0;
+      kitchen.soap.queueResponse(Readable.from([]));
+      kitchen.soap.queueFailure(new SoapFaultError('http://p', 'Play', 402, 'Invalid args', ''));
+      await assert.rejects(
+        registry.get('tunein')?.(context, ['play', 's1']) ?? Promise.reject(new Error()),
+        SoapFaultError,
+      );
+      assert.equal(kitchen.soap.calls.filter((c) => c.action === SOAP_ACTIONS.Play).length, 1);
+    } finally {
+      mock.timers.reset();
+    }
   });
 
   it('bbcsounds builds the hls uri and metadata', async () => {

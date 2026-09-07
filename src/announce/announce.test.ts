@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 
+import { RequestTimeoutError } from '../discovery/errors.ts';
 import type { Preset } from '../discovery/types.ts';
 import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
@@ -165,6 +166,41 @@ describe('Announcer', () => {
     assert.deepEqual(system.appliedPresets[1]?.players, preset.players);
     assert.ok(messages().includes('players did not regroup in time, playing anyway'));
     assert.equal(kitchen.soap.calls.filter((call) => call.action.endsWith('#Play')).length, 1);
+  });
+
+  it('retries a failed restore once before giving up on it', async () => {
+    const { system, kitchen, announcer, messages } = await setup();
+    let restoreAttempts = 0;
+    system.applyPreset.mock.mockImplementation((preset: Preset) => {
+      system.appliedPresets.push(preset);
+      if (preset.uri !== CLIP.uri) {
+        restoreAttempts += 1;
+        if (restoreAttempts === 1) {
+          return Promise.reject(new RequestTimeoutError('http://p', 10_000));
+        }
+      }
+      return Promise.resolve();
+    });
+
+    await settle(announcer.announce({ kind: 'player', player: kitchen.player }, CLIP));
+
+    assert.equal(restoreAttempts, 2, 'the restore was tried twice');
+    assert.ok(messages().includes('command failed, retrying'));
+    assert.ok(!messages().includes('restore failed'), 'the retry succeeded quietly');
+
+    // A restore that keeps failing is reported once, after the retry.
+    restoreAttempts = 0;
+    system.applyPreset.mock.mockImplementation((preset: Preset) => {
+      system.appliedPresets.push(preset);
+      if (preset.uri !== CLIP.uri) {
+        restoreAttempts += 1;
+        return Promise.reject(new Error('still busy'));
+      }
+      return Promise.resolve();
+    });
+    await settle(announcer.announce({ kind: 'player', player: kitchen.player }, CLIP));
+    assert.equal(restoreAttempts, 2);
+    assert.equal(messages().filter((m) => m === 'restore failed').length, 1);
   });
 
   it('restores even when playback fails, and reports the failure', async () => {

@@ -49,6 +49,34 @@ describe('pauseall / resumeall', () => {
     );
   });
 
+  it('keeps going when one group refuses to pause and reports it', async () => {
+    const { registry, context, kitchen, office } = await setup();
+    await office.player.handleLastChange({
+      transportstate: { val: 'PLAYING' },
+      avtransporturi: { val: 'x-sonos-htastream:RINCON_TV:spdif' },
+    });
+    office.soap.queueFailure(new Error('UPnP error 701'));
+
+    const result = await registry.get('pauseall')?.(context, []);
+
+    assert.deepEqual(result, {
+      status: 'success',
+      paused: ['Kitchen'],
+      failed: [{ room: 'Office', error: 'UPnP error 701' }],
+    });
+    assert.deepEqual(
+      kitchen.soap.calls.map((c) => c.action),
+      [SOAP_ACTIONS.Pause],
+    );
+
+    await registry.get('resumeall')?.(context, []);
+    assert.deepEqual(
+      kitchen.soap.calls.map((c) => c.action),
+      [SOAP_ACTIONS.Pause, SOAP_ACTIONS.Play],
+    );
+    assert.equal(office.soap.calls.filter((c) => c.action === SOAP_ACTIONS.Play).length, 0);
+  });
+
   it('delays by minutes when asked and validates the delay', async () => {
     const { registry, context, kitchen } = await setup();
 

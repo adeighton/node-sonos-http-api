@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 
+import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
 import { fakePresetPlayer } from '../testing/fake-player.ts';
 import type { FakePresetPlayer } from '../testing/fake-player.ts';
 import { applyPreset } from './apply-preset.ts';
 import type { PresetSystem } from './apply-preset.ts';
-import { ArgumentError } from './errors.ts';
+import { ArgumentError, RequestTimeoutError } from './errors.ts';
 import type { Preset } from './types.ts';
 
 function fullPreset(): Preset {
@@ -188,6 +189,37 @@ describe('applyPreset', () => {
     );
     assert.ok(messages().includes('failed to break out coordinator'));
     assert.equal(coordinator.play.mock.callCount(), 0);
+  });
+
+  it('retries the break-out once when the player merely timed out', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      const coordinator = fakePresetPlayer({
+        roomName: 'Bedroom',
+        coordinatorUuid: 'RINCON_ELSEWHERE',
+      });
+      let calls = 0;
+      coordinator.becomeCoordinatorOfStandaloneGroup.mock.mockImplementation(() => {
+        calls += 1;
+        return calls === 1
+          ? Promise.reject(new RequestTimeoutError('http://p', 10_000))
+          : Promise.resolve();
+      });
+      const { logger, messages } = captureLogs();
+      const system: PresetSystem = { getPlayer: () => coordinator, zones: [] };
+
+      const pending = applyPreset(system, { players: [{ roomName: 'Bedroom' }] }, logger);
+      await flushPromises();
+      mock.timers.tick(1000);
+      await flushPromises();
+      await pending;
+
+      assert.equal(coordinator.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 2);
+      assert.ok(messages().includes('command failed, retrying'));
+      assert.equal(coordinator.play.mock.callCount(), 1);
+    } finally {
+      mock.timers.reset();
+    }
   });
 
   it('sets the uri and metadata for a uri-only preset (breaking out first)', async () => {

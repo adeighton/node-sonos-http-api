@@ -72,7 +72,7 @@ export const UPNP_ERROR_DESCRIPTIONS: Readonly<Record<number, string>> = Object.
   737: 'No DNS server',
   738: 'Bad domain name',
   739: 'Server error',
-  800: 'Command not allowed for this player (usually: it is not the group coordinator)',
+  800: 'Command not allowed for this player or content (not the group coordinator, or an unknown item)',
 });
 
 export class RequestFailedError extends RequestError {

@@ -1,3 +1,4 @@
+import { playWhenReady } from '../discovery/retry.ts';
 import { BadRequestError } from '../http/errors.ts';
 import { requireValue } from './parse.ts';
 import type { Action, ActionRegistry } from './registry.ts';
@@ -11,7 +12,7 @@ export function bbcSoundsUri(station: string): string {
 }
 
 /** `/{room}/bbcsounds/{play|set}/{station}` (station names: bbc_radio_one, bbc_6music, ...). */
-const bbcSounds: Action = async ({ player }, values) => {
+const bbcSounds: Action = async ({ player, logger }, values) => {
   const action = values[0];
   const station = encodeURIComponent(requireValue(values[1], 'BBC Sounds station name'));
   if (action !== 'play' && action !== 'set') {
@@ -20,7 +21,7 @@ const bbcSounds: Action = async ({ player }, values) => {
 
   await player.coordinator.setAVTransport(bbcSoundsUri(station), bbcSoundsMetadata(station));
   if (action === 'play') {
-    await player.coordinator.play();
+    await playWhenReady(player.coordinator, logger);
   }
 };
 

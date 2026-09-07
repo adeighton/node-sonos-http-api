@@ -1,3 +1,4 @@
+import { playWhenReady } from '../discovery/retry.ts';
 import { BadRequestError } from '../http/errors.ts';
 import { requireValue } from './parse.ts';
 import type { Action, ActionRegistry } from './registry.ts';
@@ -11,7 +12,7 @@ export function tuneInUri(encodedStationId: string, serviceId: number): string {
 }
 
 /** `/{room}/tunein/{play|set}/{station id}` */
-const tuneIn: Action = async ({ player, system }, values) => {
+const tuneIn: Action = async ({ player, system, logger }, values) => {
   const action = values[0];
   const stationId = encodeURIComponent(requireValue(values[1], 'TuneIn station id'));
   if (action !== 'play' && action !== 'set') {
@@ -22,7 +23,7 @@ const tuneIn: Action = async ({ player, system }, values) => {
   const metadata = tuneInMetadata(stationId, system.getServiceType('TuneIn'));
   await player.coordinator.setAVTransport(uri, metadata);
   if (action === 'play') {
-    await player.coordinator.play();
+    await playWhenReady(player.coordinator, logger);
   }
 };
 

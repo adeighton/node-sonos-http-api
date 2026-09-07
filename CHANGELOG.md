@@ -36,6 +36,18 @@ and 26. The vendored `sonos-discovery` library now lives in `src/discovery`.
 - The library search says "The music library has not been loaded yet" instead of crashing
   when `/musicsearch/library/...` is used before `/musicsearch/library/load`.
 
+### Found by the live test suite (September 2026)
+
+- `pauseall` is best effort: a group that refuses to pause (a TV input, for instance) no longer
+  fails the whole request. The response lists `paused` rooms and `failed` ones with the reason,
+  and `resumeall` resumes only what actually paused.
+- `tunein` and `bbcsounds` retry `Play` once, a second later, when the player answers UPnP 701
+  because it is still switching to the new stream.
+- Breaking a player out of its group is retried once after a timeout, and a failed announcement
+  restore is retried once, so a player busy regrouping no longer leaves a room on the clip.
+- A new live integration suite (`npm run test:live`, see the README) exercises every action
+  against the real system and verifies the house is restored afterwards.
+
 ### Configuration
 
 - Secrets and ports can come from environment variables or a `.env` file (see `.env.example`);

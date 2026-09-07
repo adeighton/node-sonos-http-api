@@ -38,6 +38,33 @@ For development:
 | `npm run smoke:discovery` | Discovers the real Sonos system on the LAN and prints the zones   |
 | `npm run webhook-echo`  | Starts a receiver on port 5007 that prints every webhook it gets    |
 
+Running the live tests
+----------------------
+
+The unit tests never touch the network. A second suite, `npm run test:live`, drives every action
+of the API against the **real Sonos system** on your LAN and checks that each room is put back the
+way it was. It is skipped entirely unless you ask for it:
+
+    SONOS_LIVE=1 npm run test:live
+
+| Variable | Meaning |
+| --- | --- |
+| `SONOS_LIVE=1` | Enables the suite. Without it every live test is reported as skipped. |
+| `SONOS_LIVE_ROOMS` | Comma-separated rooms the tests may control and make noise in (default `1. Dining Room,1. Kitchen`). |
+| `SONOS_LIVE_SCRATCH_ROOM` | A room whose queue may be replaced. Without it, queue-changing tests run only on a test room whose queue is already empty, and are skipped otherwise. |
+| `SONOS_LIVE_PRESET` | The preset used by `saypreset` / `clippreset` (default `firstfloor`). |
+| `SONOS_LIVE_API` | Test an already running server (for example `http://man-in-the-ceiling.local:5005`) instead of starting one. |
+| `SONOS_DISCOVERY_HOSTS` | As for the server: a player IP when multicast discovery cannot reach the system. |
+
+What to expect: the suite plays short clips and phrases in the test rooms at volume 15, and the
+`sayall`, `clipall` and `pauseall` tests briefly touch every room in the house. Each test snapshots
+the whole house first and fails if grouping, volumes, mute or play modes differ afterwards, so run
+it when nobody is using the system, and stop the production server on the Pi first if the two
+would otherwise announce over each other. Tests whose preconditions are missing (a queue with
+tracks, a streaming service account, AWS credentials) skip themselves and say why.
+`test/live/manifest.ts` maps every registered action to its live test; the suite fails if an
+action is added without one.
+
 Deliberately held-back dependencies
 -----------------------------------
 

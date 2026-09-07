@@ -2,6 +2,7 @@ import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
 import { ArgumentError } from './errors.ts';
 import type { PlayMode } from './player-state.ts';
+import { withTransientRetry } from './retry.ts';
 import type { Preset } from './types.ts';
 
 /** What applyPreset needs from a player; `Player` satisfies it, and tests use plain fakes. */
@@ -121,7 +122,12 @@ async function pauseOthers(
 
 async function breakOutCoordinator(coordinator: PresetTarget, logger: Logger): Promise<void> {
   try {
-    await coordinator.becomeCoordinatorOfStandaloneGroup();
+    // A player busy regrouping can take longer than the request timeout; one retry covers it.
+    await withTransientRetry(() => coordinator.becomeCoordinatorOfStandaloneGroup(), {
+      label: 'BecomeCoordinatorOfStandaloneGroup',
+      backoffMs: 1000,
+      logger,
+    });
   } catch (error) {
     // Critical for the preset to work, so this one is not swallowed.
     logger.warn({ err: error, room: coordinator.roomName }, 'failed to break out coordinator');

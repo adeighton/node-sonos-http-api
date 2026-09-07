@@ -1,4 +1,5 @@
 import type { Player, Zone } from '../discovery/player.ts';
+import { withTransientRetry } from '../discovery/retry.ts';
 import type { Preset } from '../discovery/types.ts';
 import { BadRequestError, ServiceUnavailableError } from '../http/errors.ts';
 import { silentLogger } from '../logger.ts';
@@ -228,7 +229,14 @@ export class Announcer {
       const preset = restorePreset(this.#system, backup);
       this.#logger.debug({ preset }, 'restoring');
       try {
-        await this.#system.applyPreset(preset);
+        // Players are often still busy regrouping after an announcement; one retry after a
+        // pause recovers most restores that would otherwise leave a room on the clip.
+        await withTransientRetry(() => this.#system.applyPreset(preset), {
+          label: 'restore',
+          backoffMs: 1000,
+          retryOn: () => true,
+          logger: this.#logger,
+        });
       } catch (error) {
         this.#logger.warn(
           {
