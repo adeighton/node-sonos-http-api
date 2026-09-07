@@ -37,6 +37,23 @@ describe('renderIndexHtml', () => {
     );
   });
 
+  it('lists the endpoints that are not actions, linking the ones a browser can open', () => {
+    const html = renderIndexHtml({
+      registry: new ActionRegistry(),
+      version: '2.0.0',
+      roomNames: [],
+    });
+
+    assert.ok(html.includes('<a href="/voices"><code>/voices</code></a>'));
+    assert.ok(html.includes('<a href="/health"><code>/health</code></a>'));
+    assert.ok(html.includes('<a href="/events"><code>/events</code></a>'));
+    assert.ok(html.includes('<code>POST</code>'), 'POST /announce is listed');
+    assert.ok(
+      !html.includes('<a href="/announce/{id}">'),
+      'a path with a placeholder is not a link',
+    );
+  });
+
   it('explains when no players are known yet', () => {
     const html = renderIndexHtml({ registry: new ActionRegistry(), version: 'x', roomNames: [] });
     assert.ok(html.includes('No players discovered yet'));

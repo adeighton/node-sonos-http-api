@@ -96,6 +96,25 @@ export function parseVoiceId(voice: string): VoiceId {
   return voice as VoiceId;
 }
 
+/**
+ * What to add to "unknown voice": the names that start the same way, or a pointer to the
+ * catalog. A misspelling ('joanna', 'Joana') is the usual reason a voice is unknown, and the
+ * error is the only place the person who typed it will look.
+ */
+export function suggestVoices(voices: ReadonlyArray<{ id: string }>, wanted: string): string {
+  if (voices.length === 0) {
+    return '';
+  }
+
+  const prefix = wanted.toLowerCase().slice(0, 3);
+  const near = voices
+    .filter((voice) => voice.id.toLowerCase().startsWith(prefix))
+    .map((voice) => voice.id);
+  return near.length > 0
+    ? `; did you mean ${near.slice(0, 3).join(' or ')}?`
+    : '; GET /voices lists the voices Polly offers';
+}
+
 function parseEngine(engine: string): PollyEngine {
   if (!POLLY_ENGINES.includes(engine as PollyEngine)) {
     throw new BadRequestError(
@@ -213,6 +232,26 @@ export function createPollyProvider(
   const limit = createLimiter(options.maxConcurrency ?? DEFAULT_CONCURRENCY);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+  /**
+   * The voice to synthesize with. The live catalog decides when there is one: it is what
+   * `GET /voices` offers and what this account can actually use, so a voice Polly added since
+   * the SDK was pinned still works, and one this account cannot use is refused here rather
+   * than at synthesis. Without a catalog, the SDK's built-in list is all we have.
+   */
+  async function resolveVoice(name: string): Promise<VoiceId> {
+    const voices = (await deps.catalog?.list()) ?? [];
+    if (voices.length === 0) {
+      return parseVoiceId(name);
+    }
+
+    if (voices.some((voice) => voice.id === name)) {
+      return name as VoiceId;
+    }
+
+    throw new BadRequestError(`Unknown Polly voice '${name}'${suggestVoices(voices, name)}`);
+  }
+
+  /** The engine check; `resolveVoice` has already established that the voice exists. */
   async function assertSupported(voice: VoiceId, engine: PollyEngine): Promise<void> {
     if (!deps.catalog) {
       return;
@@ -221,9 +260,8 @@ export function createPollyProvider(
     if ((await deps.catalog.supports(voice, engine)) === 'no') {
       const engines = await deps.catalog.enginesFor(voice);
       throw new BadRequestError(
-        engines.length > 0
-          ? `Voice '${voice}' does not support the ${engine} engine; it supports ${engines.join(', ')}`
-          : `Polly has no voice named '${voice}'`,
+        `Voice '${voice}' does not support the ${engine} engine` +
+          (engines.length > 0 ? `; it supports ${engines.join(', ')}` : ''),
       );
     }
   }
@@ -257,7 +295,7 @@ export function createPollyProvider(
   return {
     name: 'polly',
     async synthesize(request: TtsRequest): Promise<Clip> {
-      const voice = parseVoiceId(request.voice ?? options.voice);
+      const voice = await resolveVoice(request.voice ?? options.voice);
       const engine = request.engine === undefined ? options.engine : parseEngine(request.engine);
       await assertSupported(voice, engine);
 

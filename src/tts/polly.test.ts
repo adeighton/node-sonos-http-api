@@ -12,7 +12,13 @@ import { withTempDir } from '../testing/with-temp-dir.ts';
 import { ClipCache } from './cache.ts';
 import { DurationIndex } from './duration-index.ts';
 import { concatMp3, parseMp3 } from './mp3.ts';
-import { createPollyProvider, parseVoiceId, pollyClipName, toHttpError } from './polly.ts';
+import {
+  createPollyProvider,
+  parseVoiceId,
+  pollyClipName,
+  suggestVoices,
+  toHttpError,
+} from './polly.ts';
 import type { PollyClientLike, PollyCommand, PollySendOptions } from './polly.ts';
 import { VoiceCatalog } from './voices.ts';
 
@@ -171,13 +177,62 @@ describe('polly provider', () => {
         { cache: cacheIn(dir), client: polly.client, catalog },
       );
 
-      await assert.rejects(provider.synthesize({ phrase: 'x', voice: 'Gandalf' }), BadRequestError);
+      await assert.rejects(
+        provider.synthesize({ phrase: 'x', voice: 'Gandalf' }),
+        (error: unknown) =>
+          error instanceof BadRequestError &&
+          error.message ===
+            "Unknown Polly voice 'Gandalf'; GET /voices lists the voices Polly offers",
+      );
+      // The usual reason a voice is unknown is a misspelling, so the catalog names the near misses.
+      await assert.rejects(
+        provider.synthesize({ phrase: 'x', voice: 'ruth' }),
+        (error: unknown) =>
+          error instanceof BadRequestError &&
+          error.message === "Unknown Polly voice 'ruth'; did you mean Ruth?",
+      );
       await assert.rejects(
         provider.synthesize({ phrase: 'x', voice: 'Ruth', engine: 'standard' }),
         (error: unknown) =>
           error instanceof BadRequestError && /supports neural, generative/.test(error.message),
       );
       assert.equal(polly.inputs.length, 0, 'nothing was synthesized');
+    });
+  });
+
+  it('takes the live catalog over the SDK list, and the SDK list when there is no catalog', async () => {
+    await withTempDir(async (dir) => {
+      // A voice added to Polly after the SDK was pinned; the catalog knows it, VoiceId does not.
+      const polly = await fakePolly({ voices: [{ Id: 'Newcomer', SupportedEngines: ['neural'] }] });
+      const withCatalog = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        {
+          cache: cacheIn(dir),
+          client: polly.client,
+          catalog: new VoiceCatalog({ client: polly.client }),
+        },
+      );
+
+      const clip = await withCatalog.synthesize({ phrase: 'x', voice: 'Newcomer' });
+      assert.equal(polly.inputs[0]?.VoiceId, 'Newcomer');
+      assert.ok(clip.uri.includes('-Newcomer-neural.mp3'));
+      // Joanna is in the SDK's list but not in this account's catalog, so it is refused here.
+      await assert.rejects(
+        withCatalog.synthesize({ phrase: 'x', voice: 'Joanna' }),
+        (error: unknown) =>
+          error instanceof BadRequestError && /Unknown Polly voice 'Joanna'/.test(error.message),
+      );
+
+      const noCatalog = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: polly.client },
+      );
+      await assert.doesNotReject(noCatalog.synthesize({ phrase: 'x', voice: 'Joanna' }));
+      await assert.rejects(
+        noCatalog.synthesize({ phrase: 'x', voice: 'Newcomer' }),
+        (error: unknown) =>
+          error instanceof BadRequestError && error.message === "Unknown Polly voice 'Newcomer'",
+      );
     });
   });
 
@@ -234,6 +289,21 @@ describe('toHttpError', () => {
     const original = new BadRequestError('mine');
     assert.equal(toHttpError(original), original);
     assert.ok(toHttpError(new Error('x')) instanceof HttpError);
+  });
+});
+
+describe('suggestVoices', () => {
+  it('names the voices that start the same way, or points at the catalog', () => {
+    const voices = [{ id: 'Joanna' }, { id: 'Joey' }, { id: 'Jitka' }, { id: 'Arthur' }];
+    assert.equal(suggestVoices(voices, 'Joana'), '; did you mean Joanna?');
+    assert.equal(suggestVoices(voices, 'Jo'), '; did you mean Joanna or Joey?');
+    assert.equal(suggestVoices(voices, 'arthur'), '; did you mean Arthur?', 'case-insensitive');
+    assert.equal(
+      suggestVoices(voices, 'Gandalf'),
+      '; GET /voices lists the voices Polly offers',
+      'nothing close: say where the list is',
+    );
+    assert.equal(suggestVoices([], 'Joanna'), '', 'no catalog, nothing to suggest');
   });
 });
 
