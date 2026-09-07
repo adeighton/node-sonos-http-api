@@ -170,7 +170,7 @@ Errors answer `{"status":"error","error":"<message>"}` with a meaningful status 
 | 413    | A `POST` body over 64 KB                                        |
 | 500    | A bug in this server (please report it with the log line)       |
 | 502    | The player (or a music service) refused the command; the message carries the UPnP error code and its meaning, e.g. `Seek was rejected by the player: UPnP error 711 (Illegal seek target: no such track or position)` |
-| 503    | No Sonos system has been discovered yet, or TTS is not configured |
+| 503    | No Sonos system has been discovered yet, TTS is not configured, too many announcements are waiting (`Retry-After`), or the server is shutting down |
 | 504    | The player did not answer in time                                |
 
 Multi-line phrases
@@ -419,6 +419,12 @@ unit and restarts the service. It refuses to run against a Pi without Node 24 an
 
 Watch the service with `ssh pi@man-in-the-ceiling.local journalctl -u sonos -f`.
 
+The unit restarts the server whenever it exits (`Restart=always`, 5 s later) and gives it 25 s
+to stop (`TimeoutStopSec=25`): on `systemctl restart sonos` a playing announcement is stopped and
+its rooms restored (`announce.shutdownDrainMs`, 15 s) before the process exits, so a deploy in
+the middle of a briefing does not leave a room on the clip. `curl http://<pi>:5005/health`
+answers 200 once the players have been found again.
+
 Note for Spotify users!
 -----------------------
 
@@ -578,6 +584,25 @@ down, `POST /announce` answers 503 with a `Retry-After` header. Bodies over 64 K
 
 `npm run smoke:announce` (with `SONOS_API` and `SONOS_ROOM`) queues a briefing on a running
 server, rings a doorbell into the middle of it and prints both records as they progress.
+
+### Moving a client from `/saypreset` to `POST /announce`
+
+A daily-briefing client that used to call `GET /saypreset/firstfloor/<text>` and wait a minute
+for the answer now does:
+
+1. `POST /announce` with `{ "text": ..., "target": { "preset": "firstfloor" }, "voice": "Joanna",
+   "engine": "neural", "idempotencyKey": "briefing-<date>" }` and read the `id` from the 202.
+   A 503 carries `Retry-After`; wait that long and post again with the same key (it will never
+   play twice).
+2. Either poll `GET /announce/<id>` until `state` is `done`, `failed` or `cancelled`, or
+   subscribe to `/events` and watch for `announcement` events with that id. The record's
+   `result.restore` says whether every room was put back; `result.warnings` says which was not.
+3. Optionally `POST /tts` with the same text a minute early, so the clip is on disk when the
+   announcement is due (`timings.prepareMs` then shows a few milliseconds).
+
+`GET /health` (no credentials) tells whether the server has found the players and is not
+shutting down: 200 with `{ status, version, uptimeSec, discovery, tts, announcements }`, 503
+otherwise, so the client can wait for it after a restart.
 
 Line-in
 -------

@@ -40,6 +40,7 @@ export interface LiveStack {
   baseUrl: string;
   /** Absent when testing a server that is already running (`SONOS_LIVE_API`). */
   system?: SonosSystem;
+  scheduler?: AnnouncementScheduler;
   close(): Promise<void>;
 }
 
@@ -156,7 +157,7 @@ export async function bootLive(): Promise<LiveStack | undefined> {
     settleMs: SETTLE_MS,
     scratchRoom: process.env.SONOS_LIVE_SCRATCH_ROOM,
   });
-  return settled(harness, { baseUrl, system, close });
+  return settled(harness, { baseUrl, system, scheduler, close });
 }
 
 export type LiveTest = (stack: LiveStack, t: TestContext) => Promise<void>;

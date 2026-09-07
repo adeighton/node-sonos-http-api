@@ -95,6 +95,8 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `/events` and the webhook carry a new `announcement` event for every state change
   (`queued`, `starting`, `playing`, `interrupted`, `restoring`, `done`, `failed`, `cancelled`).
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
+- `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
+  facts once the players are known; 503 while starting or shutting down.
 
 ### Configuration
 

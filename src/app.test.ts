@@ -299,6 +299,23 @@ describe('createApp', () => {
     });
   });
 
+  it('answers /health without credentials, 503 until players are known', async () => {
+    await withWebroot(async (webroot) => {
+      const { app, system } = testApp(webroot, {
+        settings: { auth: { username: 'u', password: 'p' } },
+      });
+      const ok = await app.request('/health');
+      assert.equal(ok.status, 200);
+      const body = (await ok.json()) as { status: string; discovery: { players: number } };
+      assert.equal(body.status, 'ok');
+      assert.equal(body.discovery.players, 2);
+
+      system.zones.length = 0;
+      assert.equal((await app.request('/health')).status, 503);
+      assert.equal((await app.request('/zones')).status, 401, 'the rest still needs auth');
+    });
+  });
+
   it('enforces basic auth on the API when configured, but not on preflight', async () => {
     await withWebroot(async (webroot) => {
       const { app } = testApp(webroot, {

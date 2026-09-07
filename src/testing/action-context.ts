@@ -21,6 +21,9 @@ import type { TestPlayer } from './test-player.ts';
 export class FakeAnnouncer implements AnnouncerLike {
   readonly calls: AnnouncementSpec[] = [];
   readonly cancelled: string[] = [];
+  queued = 0;
+  current: string | undefined;
+  draining = false;
   /** When set, every handle's `done` rejects with it. */
   failure: Error | undefined;
   readonly #handles = new Map<string, AnnouncementHandle>();

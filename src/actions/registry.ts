@@ -14,6 +14,12 @@ export interface AnnouncerLike {
   submit(spec: AnnouncementSpec): AnnouncementHandle;
   /** A queued, playing or interrupted announcement, for cancelling. */
   find(id: string): AnnouncementHandle | undefined;
+  /** Announcements waiting behind the current one. */
+  readonly queued: number;
+  /** The id of the announcement in progress, if any. */
+  readonly current: string | undefined;
+  /** Shutting down: new announcements are refused. */
+  readonly draining: boolean;
 }
 
 /** What actions may use of the Sonos system (SonosSystem satisfies it; tests use a fake). */

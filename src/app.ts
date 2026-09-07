@@ -15,6 +15,7 @@ import type { HistoryLike } from './http/announce-routes.ts';
 import { decodePathSegments, resolveRequest, runAction } from './http/dispatch.ts';
 import { HttpError, errorBody, statusForError } from './http/errors.ts';
 import type { EventHub } from './http/events.ts';
+import { healthReport } from './http/health.ts';
 import { renderIndexHtml } from './http/index-page.ts';
 import type { Logger } from './logger.ts';
 import type { PresetStore } from './presets/store.ts';
@@ -86,6 +87,17 @@ export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }
   app.get('/clips/*', (c) => c.json(errorBody(new Error('No such clip')), 404));
 
   app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'] }));
+
+  // For monitors: no credentials needed, nothing sensitive in the body.
+  app.get('/health', (c) => {
+    const { httpStatus, body } = healthReport({
+      system: deps.system,
+      announcer: deps.announcer,
+      tts: deps.tts,
+      version: deps.version,
+    });
+    return c.json(body, httpStatus);
+  });
 
   if (settings.auth) {
     app.use(

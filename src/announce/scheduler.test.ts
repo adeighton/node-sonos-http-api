@@ -164,7 +164,9 @@ describe('AnnouncementScheduler', () => {
     await flushPromises();
     kitchen.soap.calls.length = 0;
 
+    assert.equal(scheduler.draining, false);
     const drained = scheduler.drain(5000);
+    assert.equal(scheduler.draining, true);
     assert.throws(() => scheduler.submit(spec('Office')), ServiceUnavailableError);
     await settleAll([drained, playing.done, waiting.done]);
 

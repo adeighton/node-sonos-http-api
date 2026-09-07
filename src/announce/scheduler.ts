@@ -68,6 +68,10 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
     return this.#current?.id;
   }
 
+  get draining(): boolean {
+    return this.#draining;
+  }
+
   submit(spec: AnnouncementSpec): AnnouncementHandle {
     if (this.#draining) {
       throw new ServiceUnavailableError('The server is shutting down', {
