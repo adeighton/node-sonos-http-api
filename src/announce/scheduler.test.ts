@@ -207,6 +207,23 @@ describe('AnnouncementScheduler', () => {
     );
   });
 
+  it('drain leaves no timer behind once the announcement has been restored', async () => {
+    // Real timers on purpose: the process must be free to exit right after the drain.
+    mock.timers.reset();
+    const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+    const { scheduler, spec, kitchen } = await setup();
+    const before = timers();
+    const handle = scheduler.submit(spec('Kitchen'));
+    await flushPromises();
+    kitchen.player.emit('playback-state', 'PLAYING');
+    assert.equal(timers(), before + 1, 'the clip waiter is the only timer while playing');
+
+    await scheduler.drain(60_000);
+
+    assert.equal((await handle.done).state, 'cancelled');
+    assert.equal(timers(), before, 'neither the waiter nor the drain timeout is left');
+  });
+
   it('logs each announcement with its id, source and request id', async () => {
     const { scheduler, spec, entries } = await setup();
     const handle = scheduler.submit(spec('Kitchen', { requestId: 'req-1' }));

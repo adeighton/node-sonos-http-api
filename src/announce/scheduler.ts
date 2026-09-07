@@ -151,10 +151,18 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
       runner.cancel();
     }
 
-    await Promise.race([
-      Promise.allSettled(active.map((runner) => runner.done)),
-      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-    ]);
+    // Cleared afterwards: a pending timer would keep the process alive for the whole timeout.
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled(active.map((runner) => runner.done)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   #remove(runner: AnnouncementRunner): void {
