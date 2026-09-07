@@ -10,12 +10,17 @@ export interface FakePresetPlayerOptions {
   /** uuid of the group coordinator; defaults to the player itself. */
   coordinatorUuid?: string;
   avTransportUri?: string;
+  /** Reported playback state; default STOPPED. */
+  playbackState?: string;
+  volume?: number;
 }
 
 type Resolving<F extends (...args: never[]) => unknown> = Mock<F>;
 
 /** A PresetTarget whose every command is a resolving mock, for applyPreset / announcement tests. */
 export interface FakePresetPlayer extends PresetTarget {
+  /** Mutable so a test can put the player in a state; commands do not change it. */
+  state: { playbackState: string; volume: number };
   play: Resolving<() => Promise<void>>;
   pause: Resolving<() => Promise<void>>;
   setVolume: Resolving<(level: number | string) => Promise<void>>;
@@ -40,6 +45,7 @@ export function fakePresetPlayer(options: FakePresetPlayerOptions): FakePresetPl
     uuid,
     coordinator: { uuid: options.coordinatorUuid ?? uuid },
     avTransportUri: options.avTransportUri ?? '',
+    state: { playbackState: options.playbackState ?? 'STOPPED', volume: options.volume ?? 0 },
     play: mock.fn(resolve),
     pause: mock.fn(resolve),
     setVolume: mock.fn((_level: number | string) => Promise.resolve()),
@@ -54,4 +60,13 @@ export function fakePresetPlayer(options: FakePresetPlayerOptions): FakePresetPl
     timeSeek: mock.fn((_seconds: number) => Promise.resolve()),
     sleep: mock.fn((_seconds: number) => Promise.resolve()),
   };
+}
+
+/** A command that stays pending until released, to observe what runs concurrently. */
+export function deferred<T = void>() {
+  let release: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release: (value: T) => release(value) };
 }

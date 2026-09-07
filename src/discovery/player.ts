@@ -28,6 +28,7 @@ import type {
   NextTrack,
   PlayMode,
   PlayModeName,
+  PlaybackState,
   PlayerSnapshot,
   RepeatMode,
   SubState,
@@ -71,6 +72,11 @@ export interface GroupVolumeEvent {
 }
 
 export interface PlayerEvents {
+  /**
+   * The new playback state, emitted the moment it is parsed from the player's event, before
+   * metadata, album art and position are resolved; listeners waiting for STOPPED need no more.
+   */
+  'playback-state': [PlaybackState];
   'transport-state': [Readonly<PlayerSnapshot>];
   'volume-change': [VolumeChangeEvent];
   'mute-change': [MuteChangeEvent];
@@ -348,6 +354,10 @@ export class Player extends EventEmitter<PlayerEvents> {
     const state = this.#state;
     state.playbackState = nodeValue(data.transportstate) ?? state.playbackState;
     state.trackNo = toInt(nodeValue(data.currenttrack));
+    // Announcements only need to know when playback stopped; tell them before the slow parts.
+    if (!this.avTransportUri.startsWith('x-rincon:')) {
+      this.emit('playback-state', state.playbackState);
+    }
     state.playMode.crossfade = nodeValue(data.currentcrossfademode) === '1';
 
     const playModeName = nodeValue(data.currentplaymode) as PlayModeName | undefined;
@@ -416,19 +426,28 @@ export class Player extends EventEmitter<PlayerEvents> {
     }
   }
 
+  /** Asks the player where it is in the current track, refreshing the snapshot's elapsed time. */
+  async getPosition(): Promise<{ relTimeSec: number; trackNo: number }> {
+    const response = await this.#soap.invoke(
+      `${this.baseUrl}${AV_TRANSPORT}`,
+      SOAP_ACTIONS.GetPositionInfo,
+    );
+    const info = await this.#soap.parse(response);
+    const relTime = info.reltime;
+    if (typeof relTime === 'string') {
+      this.#state.relTime = parseTime(relTime);
+    }
+
+    this.#state.stateTime = Date.now();
+    return {
+      relTimeSec: this.#state.relTime,
+      trackNo: toInt(typeof info.track === 'string' ? info.track : undefined),
+    };
+  }
+
   async #getPositionInfo(): Promise<void> {
     try {
-      const response = await this.#soap.invoke(
-        `${this.baseUrl}${AV_TRANSPORT}`,
-        SOAP_ACTIONS.GetPositionInfo,
-      );
-      const info = await this.#soap.parse(response);
-      const relTime = info.reltime;
-      if (typeof relTime === 'string') {
-        this.#state.relTime = parseTime(relTime);
-      }
-
-      this.#state.stateTime = Date.now();
+      await this.getPosition();
     } catch (error) {
       this.#logger.error({ err: error, room: this.roomName }, 'GetPositionInfo failed');
     }

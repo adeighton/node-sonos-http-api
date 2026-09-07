@@ -1,5 +1,6 @@
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
+import { mapLimit } from '../util/parallel.ts';
 import { ArgumentError } from './errors.ts';
 import type { PlayMode } from './player-state.ts';
 import { withTransientRetry } from './retry.ts';
@@ -11,6 +12,8 @@ export interface PresetTarget {
   uuid: string;
   coordinator: { uuid: string };
   avTransportUri: string;
+  /** Event-fed snapshot; only zones that are playing get paused. */
+  state: { playbackState: string; volume: number };
   play(): Promise<unknown>;
   pause(): Promise<unknown>;
   setVolume(level: number | string): Promise<unknown>;
@@ -48,6 +51,9 @@ function resolvePlayers(system: PresetSystem, preset: Preset): PresetTarget[] {
   });
 }
 
+/** Players are independent devices: commands to different players go out at once, a few at a time. */
+const PLAYER_CONCURRENCY = 4;
+
 /** Joins every player after the first to the first one's group; failures are logged and skipped. */
 async function groupWithCoordinator(players: PresetTarget[], logger: Logger): Promise<void> {
   const coordinator = players[0];
@@ -56,12 +62,16 @@ async function groupWithCoordinator(players: PresetTarget[], logger: Logger): Pr
   }
 
   const groupingUri = `x-rincon:${coordinator.uuid}`;
-  for (const player of players.slice(1)) {
+  const joining = players.slice(1).filter((player) => {
     if (player.avTransportUri === groupingUri) {
       logger.debug({ room: player.roomName }, 'already grouped with coordinator, skipping');
-      continue;
+      return false;
     }
 
+    return true;
+  });
+
+  await mapLimit(joining, PLAYER_CONCURRENCY, async (player) => {
     logger.debug({ room: player.roomName, coordinator: coordinator.roomName }, 'adding to group');
     try {
       await player.setAVTransport(groupingUri);
@@ -71,7 +81,7 @@ async function groupWithCoordinator(players: PresetTarget[], logger: Logger): Pr
         'failed to add player to group',
       );
     }
-  }
+  });
 }
 
 /** Removes members of the coordinator's group that the preset does not mention; failures are logged. */
@@ -91,7 +101,8 @@ async function ungroupFromCoordinator(
   }
 
   const wanted = new Set(players.map((player) => player.roomName));
-  for (const member of zone.members.filter((candidate) => !wanted.has(candidate.roomName))) {
+  const leaving = zone.members.filter((candidate) => !wanted.has(candidate.roomName));
+  await mapLimit(leaving, PLAYER_CONCURRENCY, async (member) => {
     logger.debug({ room: member.roomName, coordinator: coordinator.roomName }, 'ungrouping');
     try {
       await member.becomeCoordinatorOfStandaloneGroup();
@@ -101,23 +112,27 @@ async function ungroupFromCoordinator(
         'failed to ungroup player',
       );
     }
-  }
+  });
 }
 
+/** Pauses every other group that is actually playing; a refusal is not worth failing over. */
 async function pauseOthers(
   system: PresetSystem,
   players: PresetTarget[],
   logger: Logger,
 ): Promise<void> {
   const presetUuids = new Set(players.map((player) => player.uuid));
-  for (const zone of system.zones.filter((candidate) => !presetUuids.has(candidate.uuid))) {
+  const playing = system.zones.filter(
+    (zone) => !presetUuids.has(zone.uuid) && zone.coordinator.state.playbackState === 'PLAYING',
+  );
+  await mapLimit(playing, PLAYER_CONCURRENCY, async (zone) => {
     logger.debug({ room: zone.coordinator.roomName }, 'pausing');
     try {
       await zone.coordinator.pause();
     } catch (error) {
       logger.debug({ err: error, room: zone.coordinator.roomName }, 'pause failed, ignoring');
     }
-  }
+  });
 }
 
 async function breakOutCoordinator(coordinator: PresetTarget, logger: Logger): Promise<void> {
@@ -140,12 +155,13 @@ async function applyVolumes(
   preset: Preset,
   logger: Logger,
 ): Promise<void> {
-  for (const [index, info] of preset.players.entries()) {
-    const player = players[index];
-    if (!player) {
-      continue;
-    }
-
+  const entries = preset.players
+    .map((info, index) => ({ info, player: players[index] }))
+    .filter(
+      (entry): entry is { info: (typeof preset.players)[number]; player: PresetTarget } =>
+        entry.player !== undefined,
+    );
+  const results = await mapLimit(entries, PLAYER_CONCURRENCY, async ({ info, player }) => {
     if (info.volume !== undefined) {
       logger.debug({ room: player.roomName, volume: info.volume }, 'setting volume');
       await player.setVolume(info.volume);
@@ -155,6 +171,10 @@ async function applyVolumes(
       logger.debug({ room: player.roomName, mute: info.mute }, 'setting mute');
       await (info.mute ? player.mute() : player.unMute());
     }
+  });
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed) {
+    throw failed.reason;
   }
 }
 

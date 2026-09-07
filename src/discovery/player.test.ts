@@ -4,6 +4,8 @@ import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 
+import { flushPromises } from '../testing/async.ts';
+import { deferred } from '../testing/fake-player.ts';
 import { fixturePath, readJsonFixture } from '../testing/fixtures.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
 import { REPEAT_MODE } from './player-state.ts';
@@ -119,6 +121,37 @@ describe('Player', () => {
       } finally {
         mock.timers.reset();
       }
+    });
+
+    it('emits playback-state as soon as the state is known, before art lookups and position', async () => {
+      const art = deferred<string>();
+      const artLookup = mock.fn((_uri: string) => art.promise);
+      const { player, soap } = createTestPlayer({ artLookup });
+      const order: string[] = [];
+      player.on('playback-state', (state) => order.push(`playback-state:${state}`));
+      player.on('transport-state', () => order.push('transport-state'));
+      soap.queueResponse(createReadStream(fixturePath('getpositioninfo.xml')));
+
+      const pending = player.handleLastChange(lastChange('avtransportlastchange.json'));
+      await flushPromises();
+      assert.deepEqual(order, ['playback-state:PLAYING'], 'known before the art lookup resolves');
+      assert.equal(soap.calls.length, 0, 'and before GetPositionInfo');
+
+      art.release('http://art');
+      await pending;
+      assert.deepEqual(order, ['playback-state:PLAYING', 'transport-state']);
+    });
+
+    it('getPosition asks the player and reports the elapsed seconds and track', async () => {
+      const { player, soap } = createTestPlayer();
+      soap.queueResponse(createReadStream(fixturePath('getpositioninfo.xml')));
+
+      const position = await player.getPosition();
+
+      assert.deepEqual(soap.callArgs(0), [AV, SOAP_ACTIONS.GetPositionInfo, undefined]);
+      assert.equal(position.relTimeSec, 142);
+      assert.equal(typeof position.trackNo, 'number');
+      assert.equal(player.state.elapsedTime, 142, 'the snapshot is refreshed too');
     });
 
     it('does not report position for grouped members or while transitioning', async () => {

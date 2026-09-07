@@ -3,7 +3,7 @@ import { describe, it, mock } from 'node:test';
 
 import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
-import { fakePresetPlayer } from '../testing/fake-player.ts';
+import { deferred, fakePresetPlayer } from '../testing/fake-player.ts';
 import type { FakePresetPlayer } from '../testing/fake-player.ts';
 import { applyPreset } from './apply-preset.ts';
 import type { PresetSystem } from './apply-preset.ts';
@@ -40,7 +40,11 @@ function groupedSystem() {
     uuid: 'RINCON_0200000001400',
     coordinatorUuid: 'RINCON_0000000001400',
   });
-  const otherPlayer = fakePresetPlayer({ roomName: 'Other zone', uuid: 'RINCON_1000000001400' });
+  const otherPlayer = fakePresetPlayer({
+    roomName: 'Other zone',
+    uuid: 'RINCON_1000000001400',
+    playbackState: 'PLAYING',
+  });
 
   const byName: Record<string, FakePresetPlayer> = {
     Kitchen: coordinator,
@@ -56,7 +60,7 @@ function groupedSystem() {
     ],
   };
 
-  return { system, getPlayer, coordinator, member, superfluous, otherPlayer };
+  return { system, getPlayer, byName, coordinator, member, superfluous, otherPlayer };
 }
 
 describe('applyPreset', () => {
@@ -305,6 +309,62 @@ describe('applyPreset', () => {
     ]) {
       assert.ok(messages().includes(expected), expected);
     }
+  });
+
+  it('pauses only the other zones that are actually playing', async () => {
+    const { system, otherPlayer } = groupedSystem();
+    const idle = fakePresetPlayer({ roomName: 'Idle zone', uuid: 'RINCON_IDLE' });
+    system.zones.push({ uuid: idle.uuid, coordinator: idle, members: [idle] });
+
+    await applyPreset(system, fullPreset());
+
+    assert.equal(otherPlayer.pause.mock.callCount(), 1, 'the playing zone is paused');
+    assert.equal(idle.pause.mock.callCount(), 0, 'a stopped zone is left alone');
+  });
+
+  it('issues member joins, volumes and pauses concurrently, in the documented order', async () => {
+    const { system, byName, coordinator, member, superfluous, otherPlayer } = groupedSystem();
+    const secondMember = fakePresetPlayer({
+      roomName: 'Hall',
+      uuid: 'RINCON_HALL',
+      coordinatorUuid: coordinator.uuid,
+    });
+    system.zones[0]?.members.push(secondMember);
+    byName.Hall = secondMember;
+    const joinA = deferred();
+    const joinB = deferred();
+    member.setAVTransport.mock.mockImplementation(() => joinA.promise);
+    secondMember.setAVTransport.mock.mockImplementation(() => joinB.promise);
+    const pending = applyPreset(system, {
+      players: [
+        { roomName: 'Kitchen', volume: 5 },
+        { roomName: 'Other room', volume: 6 },
+        { roomName: 'Hall', volume: 7 },
+      ],
+      pauseOthers: true,
+      uri: 'x-file-cifs://nas/clip.mp3',
+    });
+    await flushPromises();
+
+    // Both joins were started without waiting for each other.
+    assert.equal(member.setAVTransport.mock.callCount(), 1);
+    assert.equal(secondMember.setAVTransport.mock.callCount(), 1);
+    assert.equal(coordinator.setAVTransport.mock.callCount(), 0, 'transport waits for the group');
+    joinA.release();
+    joinB.release();
+    await pending;
+
+    assert.equal(superfluous.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 1);
+    assert.equal(otherPlayer.pause.mock.callCount(), 1);
+    assert.deepEqual(coordinator.setAVTransport.mock.calls[0]?.arguments, [
+      'x-file-cifs://nas/clip.mp3',
+      undefined,
+    ]);
+    assert.deepEqual(
+      [coordinator, member, secondMember].map((p) => p.setVolume.mock.calls[0]?.arguments[0]),
+      [5, 6, 7],
+    );
+    assert.equal(coordinator.play.mock.callCount(), 1);
   });
 
   it('rejects unknown rooms and empty presets with an ArgumentError', async () => {
