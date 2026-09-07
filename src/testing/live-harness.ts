@@ -101,6 +101,10 @@ interface ZoneJson {
   members: ZoneMemberJson[];
 }
 
+function isTvInput(uri: string): boolean {
+  return uri.startsWith('x-sonos-htastream:');
+}
+
 function isPlaying(state: string): boolean {
   return state === 'PLAYING' || state === 'TRANSITIONING';
 }
@@ -201,7 +205,11 @@ export class LiveHarness {
       };
       diff('coordinator', was.coordinator, now.coordinator);
       diff('members', was.members, now.members);
-      diff('volume', was.volume, now.volume);
+      if (!isTvInput(was.uri)) {
+        // A home-theatre player on its TV input follows the TV remote's volume, which anyone
+        // in that room may press while a test runs; that is not something a test can restore.
+        diff('volume', was.volume, now.volume);
+      }
       diff('mute', was.mute, now.mute);
       diff('uri', was.uri, now.uri);
       diff('playMode', was.playMode, now.playMode);

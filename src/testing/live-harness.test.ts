@@ -109,6 +109,24 @@ describe('LiveHarness', () => {
     await assert.rejects(harness.assertRestored(afterMute), /Kitchen.*(uri|playbackState)/);
   });
 
+  it('lets the volume of a room on its TV input drift: the TV remote controls it', async () => {
+    const { harness, rooms } = harnessOverFakes();
+    const den = rooms.get('Den');
+    assert.ok(den);
+    await den.player.handleLastChange({
+      transportstate: { val: 'PLAYING' },
+      avtransporturi: { val: 'x-sonos-htastream:RINCON_1:spdif' },
+      volume: [{ channel: 'Master', val: '6' }],
+    });
+    const before = await harness.snapshot();
+
+    await den.player.handleLastChange({ volume: [{ channel: 'Master', val: '8' }] });
+    await assert.doesNotReject(harness.assertRestored(before));
+
+    await den.player.handleLastChange({ mute: [{ channel: 'Master', val: '1' }] });
+    await assert.rejects(harness.assertRestored(before), /Den.*mute/);
+  });
+
   it('treats TRANSITIONING as PLAYING and ignores rooms outside the list', async () => {
     const { harness, rooms } = harnessOverFakes(['Kitchen', 'Den']);
     const kitchen = rooms.get('Kitchen');
