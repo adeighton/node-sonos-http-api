@@ -6,6 +6,7 @@ import { clipFile, speech, textPreview } from '../actions/announce.ts';
 import type { PrepareDeps } from '../actions/announce.ts';
 import type { ActionSystem, AnnouncerLike } from '../actions/registry.ts';
 import type { AnnounceTarget, AnnouncementSpec } from '../announce/types.ts';
+import { POLLY_ENGINES } from '../config/schema.ts';
 import type { AnnouncementHistory } from '../history/sqlite.ts';
 import type { Logger } from '../logger.ts';
 import type { PresetStore } from '../presets/store.ts';
@@ -170,6 +171,20 @@ export function createAnnounceRoutes(
       cached: clip.cached ?? false,
       synthMs: clip.synthMs ?? 0,
       chunks: clip.chunks ?? 1,
+    });
+  });
+
+  /**
+   * Polly's voice catalog: which voices exist, how each reads, and which engines it supports.
+   * Backed by one DescribeVoices call cached for a day, so a client can offer a dropdown instead
+   * of a free-text voice name that only fails once the announcement is being synthesized. An
+   * empty list (no Polly configured, or AWS unreachable) is a 200, so a form degrades rather
+   * than breaks.
+   */
+  routes.get('/voices', async (c) => {
+    const voices = (await deps.tts.catalog?.list()) ?? [];
+    return c.json({ voices, engines: POLLY_ENGINES }, 200, {
+      'Cache-Control': 'public, max-age=3600',
     });
   });
 

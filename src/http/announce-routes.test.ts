@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 
 import { ActionRegistry } from '../actions/registry.ts';
 import type { AnnouncementTransition } from '../announce/types.ts';
@@ -12,11 +12,13 @@ import { silentLogger } from '../logger.ts';
 import { PresetStore } from '../presets/store.ts';
 import { createActionContext } from '../testing/action-context.ts';
 import { withTempDir } from '../testing/with-temp-dir.ts';
+import type { PollyClientLike } from '../tts/polly.ts';
+import { VoiceCatalog } from '../tts/voices.ts';
 import { BadRequestError } from './errors.ts';
 import { EventHub } from './events.ts';
 
 /** The whole app, so the routes are exercised behind the real middleware and error mapping. */
-async function setup(presetDir?: string) {
+async function setup(presetDir?: string, catalog?: VoiceCatalog) {
   const { context, announcer, spoken, system } = createActionContext({
     rooms: ['Kitchen', 'Office'],
   });
@@ -30,7 +32,7 @@ async function setup(presetDir?: string) {
     settings: settingsSchema.parse({ announce: { idempotencyWindowMs: 60_000 } }),
     registry: new ActionRegistry(),
     presets,
-    tts: context.tts,
+    tts: { ...context.tts, catalog },
     clips: context.clips,
     announcer,
     history,
@@ -253,5 +255,57 @@ describe('POST /tts', () => {
     });
     assert.deepEqual(spoken, [{ phrase: 'Warm me up', voice: 'Brian' }]);
     assert.equal((await post('/tts', {})).status, 400);
+  });
+});
+
+describe('GET /voices', () => {
+  it('serves the cached catalog and the engines this server accepts', async () => {
+    const send = mock.fn(() =>
+      Promise.resolve({
+        Voices: [
+          {
+            Id: 'Arthur',
+            Gender: 'Male',
+            LanguageCode: 'en-GB',
+            LanguageName: 'British English',
+            SupportedEngines: ['neural'],
+          },
+        ],
+      }),
+    );
+    const client: PollyClientLike = { send };
+    const { app } = await setup(undefined, new VoiceCatalog({ client }));
+
+    const response = await app.request('/voices');
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Cache-Control'), 'public, max-age=3600');
+    assert.deepEqual(await response.json(), {
+      voices: [
+        {
+          id: 'Arthur',
+          gender: 'Male',
+          language: 'en-GB',
+          languageName: 'British English',
+          engines: ['neural'],
+        },
+      ],
+      engines: ['standard', 'neural', 'long-form', 'generative'],
+    });
+
+    await app.request('/voices');
+    assert.equal(send.mock.callCount(), 1, 'served from the day-long cache');
+  });
+
+  it('answers 200 with an empty list when no Polly provider is configured', async () => {
+    const { app } = await setup();
+
+    const response = await app.request('/voices');
+
+    assert.equal(response.status, 200, 'a form degrades rather than breaks');
+    assert.deepEqual(await response.json(), {
+      voices: [],
+      engines: ['standard', 'neural', 'long-form', 'generative'],
+    });
   });
 });

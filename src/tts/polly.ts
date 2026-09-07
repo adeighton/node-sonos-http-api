@@ -30,9 +30,13 @@ export interface PollyAudio {
   transformToByteArray(): Promise<Uint8Array>;
 }
 
+/** The fields of a DescribeVoices entry this server reads (the SDK's type has many more). */
 export interface PollyVoiceInfo {
   Id?: string | undefined;
   SupportedEngines?: string[] | undefined;
+  Gender?: string | undefined;
+  LanguageCode?: string | undefined;
+  LanguageName?: string | undefined;
 }
 
 export interface PollyResponse {

@@ -17,10 +17,13 @@ import type { Clip, TtsProvider, TtsRequest } from './provider.ts';
 import { VoiceCatalog } from './voices.ts';
 
 export type { Clip, TtsProvider, TtsRequest } from './provider.ts';
+export type { PollyVoice } from './voices.ts';
 
 /** What actions use: speech for a phrase, from whichever provider is configured first. */
 export interface TtsService {
   readonly providers: readonly string[];
+  /** Polly's voice catalog; absent when no Polly provider is configured. */
+  readonly catalog?: VoiceCatalog;
   speak(request: TtsRequest): Promise<Clip>;
 }
 
@@ -49,6 +52,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
   });
 
   const providers: TtsProvider[] = [];
+  let catalog: VoiceCatalog | undefined;
   if (settings.aws) {
     const credentials =
       settings.aws.credentials?.accessKeyId && settings.aws.credentials.secretAccessKey
@@ -60,6 +64,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
     const client =
       deps.pollyClient ??
       createPollyClient({ region: settings.aws.credentials?.region, credentials });
+    catalog = new VoiceCatalog({ client, logger });
     providers.push(
       createPollyProvider(
         {
@@ -69,7 +74,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
           timeoutMs: settings.aws.timeoutMs,
           chunkTargetChars: settings.aws.chunkTargetChars,
         },
-        { cache, client, catalog: new VoiceCatalog({ client, logger }) },
+        { cache, client, catalog },
       ),
     );
   }
@@ -81,6 +86,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
 
   return {
     providers: providers.map((provider) => provider.name),
+    catalog,
     async speak(request) {
       const provider = providers[0];
       if (!provider) {

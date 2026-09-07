@@ -573,6 +573,20 @@ Otherwise the answer is `202 Accepted` with `Location: /announce/<id>` and
                                   rooms restored (202; 409 once it is finished)
     POST /tts  { "text" | "ssml", "voice"?, "engine"? }
                                   synthesize ahead of time; answers { uri, durationMs, cached, synthMs, chunks }
+    GET /voices                   every Polly voice and the engines it supports, for a dropdown
+
+`GET /voices` answers `{ voices: [{ id, gender, language, languageName, engines }], engines }`,
+where the top-level `engines` are the ones this server accepts. It comes from one `DescribeVoices`
+call cached for a day, so it costs nothing to poll, and it is the same list the server validates
+against: a voice/engine pair the dropdown offers is one the announcement will accept. When Polly
+is not configured, or AWS cannot be reached, the answer is still 200 with `voices: []` — a form
+should degrade to its own list rather than break.
+
+Worth knowing which way a bad voice fails: a `POST /announce` without `wait` is *accepted* (202)
+and the voice is only checked when synthesis starts, so an unknown voice or an unsupported
+voice/engine pair becomes a `failed` announcement with the reason in `error`, not a rejected
+request. With `wait: true` (and on the `GET /say*` actions) the same problem is a 400, because
+the caller is still there to hear it. That asymmetry is why the dropdown is worth having.
 
 States: `queued → starting → playing → restoring → done`, with `interrupted` between two
 `playing`s when an urgent announcement cut in, and `failed` or `cancelled` instead of `done`.
@@ -602,6 +616,8 @@ for the answer now does:
    `result.restore` says whether every room was put back; `result.warnings` says which was not.
 3. Optionally `POST /tts` with the same text a minute early, so the clip is on disk when the
    announcement is due (`timings.prepareMs` then shows a few milliseconds).
+4. Build any voice picker from `GET /voices` rather than a free-text field, so a voice that does
+   not exist (or an engine that voice does not support) cannot be saved in the first place.
 
 `GET /health` (no credentials) tells whether the server has found the players and is not
 shutting down: 200 with `{ status, version, uptimeSec, discovery, tts, announcements }`, 503

@@ -20,6 +20,10 @@ const BRIEFING = [
   'assembled a bookshelf without leftover screws. Have a good day.',
 ].join('\n');
 
+function ttsConfigured(): boolean {
+  return Boolean(process.env.AWS_ACCESS_KEY_ID);
+}
+
 function announcement(body: unknown): AnnouncementResult {
   const result = body as { announcement?: AnnouncementResult };
   assert.ok(result.announcement, JSON.stringify(body));
@@ -28,7 +32,7 @@ function announcement(body: unknown): AnnouncementResult {
 
 describeLive('text-to-speech (live)', ({ it }) => {
   it('synthesizes a phrase once and serves the cached clip afterwards', async ({ harness }, t) => {
-    if (!process.env.AWS_ACCESS_KEY_ID) {
+    if (!ttsConfigured()) {
       t.skip('AWS credentials are not configured');
       return;
     }
@@ -63,7 +67,7 @@ describeLive('text-to-speech (live)', ({ it }) => {
   it('reads a multi-paragraph briefing longer than one Polly request as a single clip', async ({
     harness,
   }, t) => {
-    if (!process.env.AWS_ACCESS_KEY_ID) {
+    if (!ttsConfigured()) {
       t.skip('AWS credentials are not configured');
       return;
     }
@@ -87,8 +91,46 @@ describeLive('text-to-speech (live)', ({ it }) => {
     });
   });
 
+  it('serves the Polly voice catalog it validates against', async ({ harness }) => {
+    const response = await harness.get('/voices');
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.headers.get('Cache-Control'), 'public, max-age=3600');
+    const { voices, engines } = response.body as {
+      voices: Array<{ id: string; gender: string; language: string; engines: string[] }>;
+      engines: string[];
+    };
+    assert.deepEqual(engines, ['standard', 'neural', 'long-form', 'generative']);
+
+    if (!ttsConfigured()) {
+      assert.deepEqual(voices, [], 'no Polly provider: an empty list, not an error');
+      return;
+    }
+
+    assert.ok(
+      voices.length > 50,
+      `Polly offers more than a handful of voices, got ${voices.length}`,
+    );
+    for (const voice of voices) {
+      assert.ok(voice.id.length > 0, JSON.stringify(voice));
+      assert.ok(voice.gender.length > 0, JSON.stringify(voice));
+      // Polly's codes are BCP 47-ish: en-US, but also arb, cmn-CN and en-GB-WLS.
+      assert.match(voice.language, /^[a-z]{2,3}(-[A-Za-z]{2,3})*$/, JSON.stringify(voice));
+      assert.ok(voice.engines.length > 0, JSON.stringify(voice));
+      for (const engine of voice.engines) {
+        assert.ok(engines.includes(engine), `unknown engine ${engine} on ${voice.id}`);
+      }
+    }
+
+    // The dropdown and the announcement read the same list: what it offers is what will play.
+    const configured = process.env.SONOS_POLLY_VOICE ?? 'Joanna';
+    const preferred = voices.find((voice) => voice.id === configured);
+    assert.ok(preferred, `the configured voice ${configured} is in the catalog`);
+    const engine = process.env.SONOS_POLLY_ENGINE ?? 'neural';
+    assert.ok(preferred.engines.includes(engine), `${configured} supports ${engine}`);
+  });
+
   it('rejects an unknown voice before touching the speakers', async ({ harness }, t) => {
-    if (!process.env.AWS_ACCESS_KEY_ID) {
+    if (!ttsConfigured()) {
       t.skip('AWS credentials are not configured');
       return;
     }

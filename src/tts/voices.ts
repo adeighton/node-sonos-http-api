@@ -1,6 +1,7 @@
 /**
- * Which engines each Polly voice supports, from one DescribeVoices call cached for a day, so a
- * voice/engine mismatch is a clear 400 instead of a synthesis failure.
+ * The Polly voices, from one DescribeVoices call cached for a day: which engines each supports,
+ * so a voice/engine mismatch is a clear 400 instead of a synthesis failure, and the whole list,
+ * so a client can offer the voices that exist rather than a free-text field (see GET /voices).
  */
 import { DescribeVoicesCommand } from '@aws-sdk/client-polly';
 
@@ -18,6 +19,15 @@ export interface VoiceCatalogOptions {
 
 export type VoiceSupport = 'yes' | 'no' | 'unknown';
 
+/** One Polly voice, as `DescribeVoices` describes it. */
+export interface PollyVoice {
+  id: string;
+  gender: string;
+  language: string;
+  languageName: string;
+  engines: string[];
+}
+
 const DAY_MS = 86_400_000;
 
 export class VoiceCatalog {
@@ -25,9 +35,9 @@ export class VoiceCatalog {
   readonly #ttlMs: number;
   readonly #now: () => number;
   readonly #logger: Logger;
-  #engines: Map<string, string[]> | undefined;
+  #voices: Map<string, PollyVoice> | undefined;
   #fetchedAt = 0;
-  #loading: Promise<Map<string, string[]> | undefined> | undefined;
+  #loading: Promise<Map<string, PollyVoice> | undefined> | undefined;
 
   constructor(options: VoiceCatalogOptions) {
     this.#client = options.client;
@@ -38,22 +48,27 @@ export class VoiceCatalog {
 
   /** Whether `voice` can be synthesized with `engine`; `unknown` when Polly could not be asked. */
   async supports(voice: string, engine: string): Promise<VoiceSupport> {
-    const engines = await this.#load();
-    if (!engines) {
+    const voices = await this.#load();
+    if (!voices) {
       return 'unknown';
     }
 
-    return engines.get(voice)?.includes(engine) ? 'yes' : 'no';
+    return voices.get(voice)?.engines.includes(engine) ? 'yes' : 'no';
   }
 
   /** The engines of `voice`, empty when unknown. */
   async enginesFor(voice: string): Promise<string[]> {
-    return [...((await this.#load())?.get(voice) ?? [])];
+    return [...((await this.#load())?.get(voice)?.engines ?? [])];
   }
 
-  #load(): Promise<Map<string, string[]> | undefined> {
-    if (this.#engines && this.#now() - this.#fetchedAt < this.#ttlMs) {
-      return Promise.resolve(this.#engines);
+  /** Every voice Polly offers; empty when the list could not be fetched. */
+  async list(): Promise<PollyVoice[]> {
+    return [...((await this.#load())?.values() ?? [])];
+  }
+
+  #load(): Promise<Map<string, PollyVoice> | undefined> {
+    if (this.#voices && this.#now() - this.#fetchedAt < this.#ttlMs) {
+      return Promise.resolve(this.#voices);
     }
 
     this.#loading ??= this.#fetch().finally(() => {
@@ -62,25 +77,31 @@ export class VoiceCatalog {
     return this.#loading;
   }
 
-  async #fetch(): Promise<Map<string, string[]> | undefined> {
+  async #fetch(): Promise<Map<string, PollyVoice> | undefined> {
     try {
       const response = await this.#client.send(new DescribeVoicesCommand({}));
-      const engines = new Map<string, string[]>();
+      const voices = new Map<string, PollyVoice>();
       for (const voice of response.Voices ?? []) {
         if (voice.Id) {
-          engines.set(voice.Id, [...(voice.SupportedEngines ?? [])]);
+          voices.set(voice.Id, {
+            id: voice.Id,
+            gender: voice.Gender ?? 'Unknown',
+            language: voice.LanguageCode ?? '',
+            languageName: voice.LanguageName ?? '',
+            engines: [...(voice.SupportedEngines ?? [])],
+          });
         }
       }
 
-      if (engines.size === 0) {
+      if (voices.size === 0) {
         // Polly always has voices; an empty answer means we should not judge anything by it.
         this.#logger.warn('Polly listed no voices; skipping the engine check');
         return undefined;
       }
 
-      this.#engines = engines;
+      this.#voices = voices;
       this.#fetchedAt = this.#now();
-      return engines;
+      return voices;
     } catch (error) {
       this.#logger.warn({ err: error }, 'could not list Polly voices; skipping the engine check');
       return undefined;

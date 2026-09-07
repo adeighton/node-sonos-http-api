@@ -101,6 +101,9 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
 - `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
   facts once the players are known; 503 while starting or shutting down.
+- `GET /voices` serves the Polly voice catalog (id, gender, language, supported engines) from the
+  same day-long cache the server validates against, so a client can offer a dropdown instead of a
+  free-text voice name; 200 with an empty list when Polly is not configured or unreachable.
 
 ### Configuration
 
