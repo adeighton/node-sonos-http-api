@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 
 import { getRequestListener } from '@hono/node-server';
 import type { Hono } from 'hono';
+import type { Env } from 'hono';
 
 import type { Settings } from './config/schema.ts';
 import { silentLogger } from './logger.ts';
@@ -15,7 +16,8 @@ import type { Logger } from './logger.ts';
 export type ServerSettings = Pick<Settings, 'port' | 'ip' | 'securePort' | 'https'>;
 
 export interface StartServerOptions {
-  app: Hono;
+  /** Any Hono app: only its `fetch` is used, so the request variables it declares do not matter. */
+  app: Pick<Hono<Env>, 'fetch'>;
   settings: ServerSettings;
   logger?: Logger;
   /** Injectable for tests. */

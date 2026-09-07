@@ -18,6 +18,7 @@ import {
   expectVolumeRoundTrip,
   expectZonesShape,
 } from './contracts.ts';
+import { FakeAnnouncer } from './action-context.ts';
 import { FakeSystem } from './fake-system.ts';
 import { LiveHarness } from './live-harness.ts';
 import { createTestPlayer } from './test-player.ts';
@@ -38,7 +39,7 @@ function setup(roomNames = ['Kitchen', 'Den']) {
     presets: new PresetStore('/nonexistent'),
     tts: { providers: [], speak: () => Promise.reject(new Error('no tts')) },
     clips: { get: () => Promise.reject(new Error('no clips')) },
-    announcer: { announce: () => Promise.resolve() },
+    announcer: new FakeAnnouncer(),
     hub: new EventHub({ logger: silentLogger }),
     logger: silentLogger,
     version: 'test',

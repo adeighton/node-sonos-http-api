@@ -13,6 +13,7 @@ import type { Settings } from './config/schema.ts';
 import { EventHub } from './http/events.ts';
 import { PresetStore } from './presets/store.ts';
 import { captureLogs } from './testing/capture-logs.ts';
+import { FakeAnnouncer } from './testing/action-context.ts';
 import { FakeSystem } from './testing/fake-system.ts';
 import { createTestPlayer } from './testing/test-player.ts';
 import { withTempDir } from './testing/with-temp-dir.ts';
@@ -42,7 +43,12 @@ function testApp(webroot: string, options: TestAppOptions = {}) {
   registry.register(
     'echo',
     (context, values) =>
-      Promise.resolve({ room: context.player.roomName, values, base: context.publicBaseUrl }),
+      Promise.resolve({
+        room: context.player.roomName,
+        values,
+        base: context.publicBaseUrl,
+        requestId: context.requestId,
+      }),
     { usage: '/{room}/echo/{values...}', description: 'echo' },
   );
   registry.register('nothing', () => Promise.resolve(), { usage: '/nothing', description: '' });
@@ -78,7 +84,7 @@ function testApp(webroot: string, options: TestAppOptions = {}) {
     presets: new PresetStore(join(webroot, 'presets'), { logger }),
     tts: { providers: [], speak: () => Promise.reject(new Error('no tts in this test')) },
     clips: { get: () => Promise.reject(new Error('no clips in this test')) },
-    announcer: { announce: () => Promise.resolve() },
+    announcer: new FakeAnnouncer(),
     hub,
     logger,
     version: '2.0.0-test',
@@ -120,11 +126,20 @@ describe('createApp', () => {
 
       const named = await app.request('/1.%20kitchen/echo/a%2Fb/50%25');
       assert.equal(named.status, 200);
+      const requestId = named.headers.get('X-Request-Id') ?? '';
+      assert.match(requestId, /^[0-9a-f-]{36}$/, 'a request id is generated and echoed');
       assert.deepEqual(await named.json(), {
         room: '1. Kitchen',
         values: ['a/b', '50%'],
         base: 'http://127.0.0.1:5005',
+        requestId,
       });
+
+      const given = await app.request('/Office/echo', {
+        headers: { 'X-Request-Id': 'briefing-7' },
+      });
+      assert.equal(given.headers.get('X-Request-Id'), 'briefing-7');
+      assert.equal(((await given.json()) as { requestId: string }).requestId, 'briefing-7');
 
       const anyRoom = await app.request('/zones');
       assert.deepEqual(await anyRoom.json(), ['1. Kitchen', 'Office']);
@@ -196,6 +211,7 @@ describe('createApp', () => {
           room: '1. Kitchen',
           values: [`Good${decoded}morning`],
           base: 'http://127.0.0.1:5005',
+          requestId: response.headers.get('X-Request-Id'),
         });
       }
     });
@@ -210,6 +226,7 @@ describe('createApp', () => {
         room: '1. Kitchen',
         values: ['a b'],
         base: 'http://127.0.0.1:5005',
+        requestId: spaced.headers.get('X-Request-Id'),
       });
       const percent = await app.request('/1.%20Kitchen/echo/100%25');
       assert.equal(((await percent.json()) as { values: string[] }).values[0], '100%');

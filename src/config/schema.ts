@@ -32,6 +32,23 @@ export const settingsSchema = z.object({
     })
     .optional(),
   announceVolume: z.coerce.number().int().min(0).max(100).default(40),
+  announce: z
+    .object({
+      /** Announcements allowed to wait behind the current one; more are refused with 503. */
+      maxQueued: z.coerce.number().int().min(1).default(10),
+      /** How long to wait for the players to regroup before playing anyway. */
+      topologyTimeoutMs: z.coerce.number().int().min(1000).default(10_000),
+      /** How long a restore waits for the topology to show the groups back in place. */
+      restoreVerifyMs: z.coerce.number().int().min(0).default(3000),
+      /** At shutdown, how long to give the current announcement to stop and restore its rooms. */
+      shutdownDrainMs: z.coerce.number().int().min(0).default(15_000),
+    })
+    .default({
+      maxQueued: 10,
+      topologyTimeoutMs: 10_000,
+      restoreVerifyMs: 3000,
+      shutdownDrainMs: 15_000,
+    }),
   cacheDir: z.string().min(1).default('cache'),
   webroot: z.string().min(1).default('static'),
   presetDir: z.string().min(1).default('presets'),

@@ -48,6 +48,35 @@ and 26. The vendored `sonos-discovery` library now lives in `src/discovery`.
 - A new live integration suite (`npm run test:live`, see the README) exercises every action
   against the real system and verifies the house is restored afterwards.
 
+### Announcements rebuilt (September 2026)
+
+- `say*` and `clip*` answer with what happened: `{ status, announcement: { id, state, rooms,
+clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per room replaces a
+  silent 200 when a room could not be put back.
+- Presets are honoured: `saypreset` / `clippreset` pause the other groups only when the preset
+  says `pauseOthers: true` (the default). Before, every announcement paused the whole house and
+  captured and restored every zone, whether it took part or not. Only zones that are actually
+  playing are paused, and only the rooms an announcement touched are restored: a player that
+  left a group rejoins it, a paused group gets one `play`, everything else is left alone.
+- Faster: text-to-speech starts at submission and overlaps the regrouping; joins, volumes and
+  pauses go out four at a time; the end of the clip is detected from the player's first event
+  rather than after album-art lookups; a player that already stands alone is no longer told to
+  leave its group first. Every stage is timed and logged.
+- `saypreset` and `clippreset` take an optional volume after the phrase / file (the README always
+  said so; the code refused it).
+- Long phrases are split at paragraph and sentence boundaries, synthesized in parallel and joined
+  into one clip; Polly's 3000-character limit no longer applies to a request. Polly failures map
+  to 400 (bad SSML, unknown voice/engine pair), 503 with `Retry-After` (throttled, or credentials
+  missing), 504 (timeout) or 502, never 500. The cache key now hashes the normalized SSML, so
+  phrases are synthesized once more; old files are kept.
+- More than `announce.maxQueued` (10) waiting announcements → 503 with `Retry-After`. On
+  shutdown (`systemctl restart sonos`) a playing announcement is stopped and its rooms restored
+  before the process exits (`announce.shutdownDrainMs`, 15 s; the unit's `TimeoutStopSec` is
+  25 s).
+- Every response carries `X-Request-Id` (a caller's is echoed) and every log line of a request,
+  including the announcement it queued, carries the same id.
+- Generated speech is served with `Cache-Control: immutable`; clips are cacheable for an hour.
+
 ### Configuration
 
 - Secrets and ports can come from environment variables or a `.env` file (see `.env.example`);
@@ -55,6 +84,8 @@ and 26. The vendored `sonos-discovery` library now lives in `src/discovery`.
   object. `settings.json` is still read (JSON5) and unknown keys are reported at startup.
 - New `discoveryHosts` / `SONOS_DISCOVERY_HOSTS` for networks where SSDP multicast cannot
   reach the players.
+- New `announce` block (`maxQueued`, `topologyTimeoutMs`, `restoreVerifyMs`, `shutdownDrainMs`)
+  and `aws.maxConcurrency`, `aws.timeoutMs`, `aws.chunkTargetChars` for text-to-speech.
 - `LOG_LEVEL` replaces `NODE_LOG_LEVEL`; `LOG_FORMAT=json` emits one JSON object per line.
 - `deploy.sh` requires Node 24 on the Pi, never copies `.env` (provision it once with `scp`)
   and runs the server with `node src/main.ts`.

@@ -294,6 +294,9 @@ Example preset (state and uri are optional):
 The first player listed in the example, "room1", will become the coordinator. It will loose it's queue when ungrouped but eventually that will be fixed in the future. Playmode defines the three options "shuffle", "repeat", "crossfade" similar to the state
 Favorite will have precedence over a uri.
 pauseOthers will pause all zones before applying the preset, effectively muting your system.  sleep is an optional value that enables the sleep timer and is defined in total seconds (600 = 10 minutes).
+`saypreset` and `clippreset` honour `pauseOthers` too: with `"pauseOthers": false` the other groups keep
+playing while the preset's rooms announce (only groups that are actually playing are ever paused,
+and they are resumed afterwards).
 
 presets folder
 --------------
@@ -357,6 +360,11 @@ Available `settings.json` options:
 * `securePort` and `https`: serve https too, from `key` + `cert` files or a `pfx` + `passphrase`
 * `auth`: require basic auth credentials, `{ "username": ..., "password": ... }`
 * `announceVolume`: the volume used by say/clip when the request gives none (default 40)
+* `announce.maxQueued`: announcements allowed to wait behind the current one (default 10; more are
+  refused with 503), `announce.topologyTimeoutMs`: how long to wait for the players to regroup
+  before playing anyway (default 10000), `announce.restoreVerifyMs`: how long a restore waits for
+  the groups to show up again before reporting `partial` (default 3000), `announce.shutdownDrainMs`:
+  at shutdown, how long a playing announcement gets to stop and restore its rooms (default 15000)
 * `presetDir`: folder to load presets from (default `presets`)
 * `cacheDir`: folder for the music library cache (default `cache`)
 * `household`: pick one Sonos household when a network has several (e.g. `Sonos_ab7d67898dcc5a6d`)
@@ -392,7 +400,8 @@ Environment variables override the file. The full list is in `.env.example`; the
 | `SONOS_HTTP_PORT`, `SONOS_HTTP_IP`, `SONOS_HTTP_SECURE_PORT` | `port`, `ip`, `securePort` |
 | `SONOS_HTTP_AUTH_USERNAME`, `SONOS_HTTP_AUTH_PASSWORD` | `auth`                     |
 | `SONOS_HOUSEHOLD`, `SONOS_DISCOVERY_HOSTS` (comma separated) | `household`, `discoveryHosts` |
-| `SONOS_ANNOUNCE_VOLUME`, `SONOS_WEBHOOK_URL`         | `announceVolume`, `webhook`  |
+| `SONOS_ANNOUNCE_VOLUME`, `SONOS_ANNOUNCE_MAX_QUEUED` | `announceVolume`, `announce.maxQueued` |
+| `SONOS_WEBHOOK_URL`                                  | `webhook`                    |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SOUNDCLOUD_CLIENT_ID` | `spotify`, `soundcloud` |
 | `LOG_LEVEL`, `LOG_FORMAT`                            | `logLevel`, `logFormat`      |
 
@@ -471,12 +480,39 @@ with `<speak>` is sent as SSML, so you can add pauses, emphasis or spell things 
 
 	/Office/say/<speak>Dinner is ready<break time="500ms"/>come downstairs</speak>
 
-Generated clips are cached in `static/tts` and reused for identical phrase, voice and engine.
+Generated clips are cached in `static/tts` and reused for identical phrase, voice and engine. A
+long phrase is split at paragraph and sentence boundaries, synthesized in parallel and joined into
+one clip, so a briefing of several thousand characters is fine (Polly alone stops at 3000).
 
 `sayall` groups every player, sets the announce volume (40% by default) and restores the previous
-grouping, volumes and playback afterwards. `saypreset` does the same on the players of a preset.
-Announcements are played one at a time: overlapping requests queue up instead of interrupting
-each other.
+grouping, volumes and playback afterwards. `saypreset` does the same on the players of a preset,
+at the preset's volumes unless a volume is given, and pauses the other groups only if the preset
+says `pauseOthers: true` (the default). Announcements are played one at a time: overlapping
+requests queue up instead of interrupting each other; when more than `announce.maxQueued`
+(10) are waiting the request is refused with 503 and a `Retry-After` header.
+
+The response tells what happened, including whether every room was put back:
+
+```json
+{
+  "status": "success",
+  "announcement": {
+    "id": "5f1c…", "state": "done", "source": "saypreset",
+    "rooms": ["1. Kitchen", "1. Dining Room"],
+    "clip": { "uri": "http://192.168.2.10:5005/tts/polly-….mp3", "durationMs": 4120, "cached": true },
+    "restore": "ok", "warnings": [],
+    "timings": { "queuedMs": 0, "prepareMs": 3, "groupMs": 410, "topologyMs": 620,
+                 "playMs": 4300, "restoreMs": 900, "totalMs": 6240 }
+  }
+}
+```
+
+`restore` is `partial` when a step failed or a group had not re-formed within
+`announce.restoreVerifyMs`; `warnings` says which room. `timings.prepareMs` is the time to fetch
+or synthesize the clip (a few milliseconds on a cache hit), `topologyMs` the wait for the players
+to regroup, `playMs` the clip itself. Every response carries an `X-Request-Id` header (yours is
+echoed back when you send one) and the same id is on every log line of that request, which makes
+"did the 7am briefing play?" a one-line journal search.
 
 Line-in
 -------

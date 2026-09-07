@@ -36,6 +36,7 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ApiResponse {
   status: number;
+  headers: Headers;
   body: unknown;
 }
 
@@ -137,7 +138,7 @@ export class LiveHarness {
       // not JSON; keep the text
     }
 
-    return { status: response.status, body };
+    return { status: response.status, headers: response.headers, body };
   }
 
   /** Convenience for `/{room}/{action}/{values...}`. */

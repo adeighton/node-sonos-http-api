@@ -1,7 +1,9 @@
-import { mock } from 'node:test';
-
 import type { ActionContext, AnnouncerLike } from '../actions/registry.ts';
-import type { Announcement, AnnounceTarget } from '../announce/announce.ts';
+import type {
+  AnnouncementHandle,
+  AnnouncementResult,
+  AnnouncementSpec,
+} from '../announce/types.ts';
 import { settingsSchema } from '../config/schema.ts';
 import type { Settings } from '../config/schema.ts';
 import type { Player } from '../discovery/player.ts';
@@ -12,13 +14,24 @@ import { FakeSystem } from './fake-system.ts';
 import { createTestPlayer } from './test-player.ts';
 import type { TestPlayer } from './test-player.ts';
 
-/** Records announcements instead of playing them. */
+/** Records announcement specs instead of playing them; every handle resolves with `result`. */
 export class FakeAnnouncer implements AnnouncerLike {
-  readonly calls: Array<{ target: AnnounceTarget; announcement: Announcement }> = [];
-  readonly announce = mock.fn((target: AnnounceTarget, announcement: Announcement) => {
-    this.calls.push({ target, announcement });
-    return Promise.resolve();
-  });
+  readonly calls: AnnouncementSpec[] = [];
+  result: AnnouncementResult = {
+    id: 'fake-announcement',
+    state: 'done',
+    source: 'fake',
+    rooms: ['Kitchen'],
+    clip: { uri: 'http://127.0.0.1:5005/clips/fake.mp3', durationMs: 1000 },
+    restore: 'ok',
+    warnings: [],
+    timings: { totalMs: 1000 },
+  };
+
+  submit(spec: AnnouncementSpec): AnnouncementHandle {
+    this.calls.push(spec);
+    return { id: this.result.id, done: Promise.resolve(this.result), cancel: () => {} };
+  }
 }
 
 export interface TestActionContext {
@@ -78,6 +91,7 @@ export function createActionContext(options: TestActionContextOptions = {}): Tes
       settings,
       presets: new PresetStore(options.presetDir ?? '/nonexistent/presets'),
       logger: silentLogger,
+      requestId: 'test-request',
       publicBaseUrl: 'http://127.0.0.1:5005',
       version: '0.0.0-test',
     },

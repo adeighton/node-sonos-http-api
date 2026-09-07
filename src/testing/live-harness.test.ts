@@ -10,6 +10,7 @@ import { SOAP_ACTIONS } from '../discovery/soap.ts';
 import { EventHub } from '../http/events.ts';
 import { silentLogger } from '../logger.ts';
 import { PresetStore } from '../presets/store.ts';
+import { FakeAnnouncer } from './action-context.ts';
 import { FakeSystem } from './fake-system.ts';
 import { fixturePath } from './fixtures.ts';
 import { LiveHarness, liveGate, parseRooms } from './live-harness.ts';
@@ -36,7 +37,7 @@ function harnessOverFakes(roomNames = ['Kitchen', 'Den']) {
     presets: new PresetStore('/nonexistent'),
     tts: { providers: [], speak: () => Promise.reject(new Error('no tts')) },
     clips: { get: () => Promise.reject(new Error('no clips')) },
-    announcer: { announce: () => Promise.resolve() },
+    announcer: new FakeAnnouncer(),
     hub: new EventHub({ logger: silentLogger }),
     logger: silentLogger,
     version: 'test',
@@ -73,6 +74,7 @@ describe('LiveHarness', () => {
     const zones = await harness.get('/zones');
     assert.equal(zones.status, 200);
     assert.ok(Array.isArray(zones.body));
+    assert.equal(zones.headers.get('content-type')?.startsWith('application/json'), true);
 
     const missing = await harness.get('/nope');
     assert.equal(missing.status, 404);

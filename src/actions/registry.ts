@@ -3,15 +3,15 @@ import type { EventEmitter } from 'node:events';
 import type { Settings } from '../config/schema.ts';
 import type { Player, SonosSystemEvents, Zone } from '../discovery/player.ts';
 import type { AvailableService, BrowseItem, Preset } from '../discovery/types.ts';
-import type { Announcement, AnnounceTarget } from '../announce/announce.ts';
+import type { AnnouncementHandle, AnnouncementSpec } from '../announce/types.ts';
 import type { Logger } from '../logger.ts';
 import type { PresetStore } from '../presets/store.ts';
 import type { ClipLibrary } from '../tts/clips.ts';
 import type { TtsService } from '../tts/index.ts';
 
-/** Plays a clip on a target and restores the previous state afterwards (see announce/announce.ts). */
+/** Queues an announcement and restores the rooms afterwards (see announce/scheduler.ts). */
 export interface AnnouncerLike {
-  announce(target: AnnounceTarget, announcement: Announcement): Promise<void>;
+  submit(spec: AnnouncementSpec): AnnouncementHandle;
 }
 
 /** What actions may use of the Sonos system (SonosSystem satisfies it; tests use a fake). */
@@ -41,7 +41,10 @@ export interface ActionContext {
   tts: TtsService;
   clips: ClipLibrary;
   announcer: AnnouncerLike;
+  /** Scoped to the request: carries `requestId` on every line. */
   logger: Logger;
+  /** From the `X-Request-Id` header, or generated; echoed back and attached to announcements. */
+  requestId: string;
   /** Where players can fetch clips from this server, e.g. `http://192.168.1.10:5005`. */
   publicBaseUrl: string;
   /** The package version, for the debug endpoint. */

@@ -196,11 +196,14 @@ export async function applyPreset(
 
   logger.debug({ coordinator: coordinator.roomName }, 'applying preset');
 
+  const hasMembers =
+    (system.zones.find((zone) => zone.uuid === coordinator.uuid)?.members.length ?? 0) > 1;
   if (coordinator.coordinator.uuid !== coordinator.uuid) {
     logger.debug({ room: coordinator.roomName }, 'breaking out coordinator: it is part of a group');
     await breakOutCoordinator(coordinator, logger);
     await groupWithCoordinator(players, logger);
-  } else if (players.length === 1 && coordinator.avTransportUri !== preset.uri) {
+  } else if (players.length === 1 && hasMembers && coordinator.avTransportUri !== preset.uri) {
+    // Leaving lets the members carry on with what they were playing under a new coordinator.
     logger.debug({ room: coordinator.roomName }, 'breaking out coordinator: uri differs');
     await breakOutCoordinator(coordinator, logger);
     await groupWithCoordinator(players, logger);

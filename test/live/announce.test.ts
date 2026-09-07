@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import type { AnnouncementResult } from '../../src/announce/types.ts';
 import type { LiveHarness } from '../../src/testing/live-harness.ts';
 import { describeLive } from './boot.ts';
 
@@ -16,6 +17,21 @@ function ttsConfigured(): boolean {
   return Boolean(process.env.AWS_ACCESS_KEY_ID);
 }
 
+/** The structured result every announcement action answers with, checked for shape. */
+function announced(body: unknown, rooms?: string[]): AnnouncementResult {
+  const { status, announcement } = body as { status: string; announcement?: AnnouncementResult };
+  assert.equal(status, 'success');
+  assert.ok(announcement, JSON.stringify(body));
+  assert.equal(announcement.state, 'done');
+  assert.equal(announcement.restore, 'ok', announcement.warnings.join('; '));
+  assert.ok((announcement.clip?.durationMs ?? 0) > 0, 'the clip has a length');
+  assert.equal(typeof announcement.timings.totalMs, 'number');
+  if (rooms) {
+    assert.deepEqual([...announcement.rooms].sort(), [...rooms].sort());
+  }
+  return announcement;
+}
+
 describeLive('announcement actions (live)', ({ it }) => {
   it('say speaks in one room and restores it', async ({ harness }, t) => {
     if (!ttsConfigured()) {
@@ -27,7 +43,9 @@ describeLive('announcement actions (live)', ({ it }) => {
     await harness.withRestore(async (before) => {
       const response = await harness.action(room, 'say', 'Live test, one room', VOLUME);
       assert.equal(response.status, 200, JSON.stringify(response.body));
-      assert.equal((response.body as { status: string }).status, 'success');
+      const result = announced(response.body, [room]);
+      assert.equal(result.source, 'say');
+      assert.equal(response.headers.get('X-Request-Id')?.length, 36, 'a request id is echoed');
       await harness.assertRestored(before);
     });
   });
@@ -45,6 +63,7 @@ describeLive('announcement actions (live)', ({ it }) => {
     await harness.withRestore(async (before) => {
       const response = await harness.action(room, 'clip', CLIP, VOLUME);
       assert.equal(response.status, 200, JSON.stringify(response.body));
+      announced(response.body, [room]);
       await harness.assertRestored(before);
     });
 
@@ -57,6 +76,7 @@ describeLive('announcement actions (live)', ({ it }) => {
     await harness.withRestore(async (before) => {
       const clip = await harness.get(`/clipall/${CLIP}/${VOLUME}`);
       assert.equal(clip.status, 200, JSON.stringify(clip.body));
+      announced(clip.body, rooms);
       await harness.assertRestored(before);
 
       if (!ttsConfigured()) {
@@ -68,6 +88,7 @@ describeLive('announcement actions (live)', ({ it }) => {
         `/sayall/${encodeURIComponent('Live test, all rooms')}/${VOLUME}`,
       );
       assert.equal(say.status, 200, JSON.stringify(say.body));
+      announced(say.body, rooms);
       await harness.assertRestored(before);
     }, rooms);
   });
@@ -82,9 +103,12 @@ describeLive('announcement actions (live)', ({ it }) => {
     }
 
     const rooms = await everyRoom(harness);
+    // The whole house is snapshotted: rooms outside the preset must come through untouched.
     await harness.withRestore(async (before) => {
-      const clip = await harness.get(`/clippreset/${PRESET}/${CLIP}`);
+      const clip = await harness.get(`/clippreset/${PRESET}/${CLIP}/${VOLUME}`);
       assert.equal(clip.status, 200, JSON.stringify(clip.body));
+      const played = announced(clip.body);
+      assert.ok(played.rooms.length > 0 && played.rooms.length < rooms.length, 'a subset of rooms');
       await harness.assertRestored(before);
 
       if (!ttsConfigured()) {
@@ -96,6 +120,7 @@ describeLive('announcement actions (live)', ({ it }) => {
         `/saypreset/${PRESET}/${encodeURIComponent('Live test, preset rooms')}`,
       );
       assert.equal(say.status, 200, JSON.stringify(say.body));
+      announced(say.body, played.rooms);
       await harness.assertRestored(before);
     }, rooms);
 

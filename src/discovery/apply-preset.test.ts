@@ -226,7 +226,7 @@ describe('applyPreset', () => {
     }
   });
 
-  it('sets the uri and metadata for a uri-only preset (breaking out first)', async () => {
+  it('sets the uri and metadata for a uri-only preset without breaking out a lone player', async () => {
     const player = fakePresetPlayer({ roomName: 'Bedroom', uuid: 'RINCON_0000000001400' });
     const system: PresetSystem = {
       getPlayer: () => player,
@@ -239,12 +239,26 @@ describe('applyPreset', () => {
       metadata: '<DIDL-Lite></DIDL-Lite>',
     });
 
-    assert.equal(player.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 1);
+    assert.equal(player.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 0);
     assert.deepEqual(player.setAVTransport.mock.calls[0]?.arguments, [
       'x-rincon-stream:UUID_0000000001400',
       '<DIDL-Lite></DIDL-Lite>',
     ]);
     assert.equal(player.setVolume.mock.callCount(), 0);
+  });
+
+  it('leaves a group it leads when a single-player preset changes its uri', async () => {
+    const leader = fakePresetPlayer({ roomName: 'Bedroom', avTransportUri: 'x-rincon-queue:B#0' });
+    const follower = fakePresetPlayer({ roomName: 'Hall', coordinatorUuid: leader.uuid });
+    const system: PresetSystem = {
+      getPlayer: () => leader,
+      zones: [{ uuid: leader.uuid, coordinator: leader, members: [leader, follower] }],
+    };
+
+    await applyPreset(system, { players: [{ roomName: 'Bedroom' }], uri: 'x-rincon-stream:X' });
+
+    assert.equal(leader.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 1);
+    assert.equal(follower.becomeCoordinatorOfStandaloneGroup.mock.callCount(), 0, 'not ungrouped');
   });
 
   it('does not break out a single player that already plays the preset uri', async () => {

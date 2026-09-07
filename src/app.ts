@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
+import { requestId } from 'hono/request-id';
+import type { RequestIdVariables } from 'hono/request-id';
 import { TrieRouter } from 'hono/router/trie-router';
 import { streamSSE } from 'hono/streaming';
 
@@ -35,7 +37,7 @@ export interface AppDeps {
 /** Paths under the webroot that players fetch without authentication. */
 const PUBLIC_STATIC_PATHS = ['/tts/*', '/clips/*', '/sonos-icon.png'];
 
-export function createApp(deps: AppDeps): Hono {
+export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }> {
   const { settings, logger } = deps;
   // TrieRouter, not the default SmartRouter. Hono decodes the path with `decodeURI` before
   // routing, and SmartRouter settles on RegExpRouter, whose wildcard compiles to `.*` — a pattern
@@ -44,12 +46,20 @@ export function createApp(deps: AppDeps): Hono {
   // request and only reconsiders if registration throws, which RegExpRouter does not do here.
   // TrieRouter is the router Hono documents as supporting every pattern, and at this app's
   // handful of routes and request rate its extra cost is immaterial.
-  const app = new Hono({ router: new TrieRouter() });
+  const app = new Hono<{ Variables: RequestIdVariables }>({ router: new TrieRouter() });
 
+  // Accepts a caller's X-Request-Id (or makes one) and echoes it, so a client's log line and
+  // this server's can be matched up.
+  app.use('*', requestId());
   app.use('*', async (c, next) => {
     await next();
     logger.debug(
-      { method: c.req.method, path: c.req.path, status: c.res.status },
+      {
+        method: c.req.method,
+        path: c.req.path,
+        status: c.res.status,
+        requestId: c.get('requestId'),
+      },
       'request handled',
     );
   });
@@ -111,6 +121,7 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/*', async (c) => {
     const segments = decodePathSegments(new URL(c.req.url).pathname);
     const { player, action, values } = resolveRequest(deps.system, segments);
+    const id = c.get('requestId');
     const result = await runAction(
       deps.registry,
       {
@@ -121,7 +132,8 @@ export function createApp(deps: AppDeps): Hono {
         tts: deps.tts,
         clips: deps.clips,
         announcer: deps.announcer,
-        logger,
+        logger: logger.child({ requestId: id }),
+        requestId: id,
         publicBaseUrl: deps.publicBaseUrl(),
         version: deps.version,
       },
@@ -145,7 +157,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     logger[status >= 500 ? 'error' : 'warn'](
-      { err: error, method: c.req.method, path: c.req.path, status },
+      { err: error, method: c.req.method, path: c.req.path, status, requestId: c.get('requestId') },
       'request failed',
     );
     const headers = error instanceof HttpError ? error.headers : undefined;

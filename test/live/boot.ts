@@ -14,7 +14,7 @@ import type { TestContext } from 'node:test';
 
 import pkg from '../../package.json' with { type: 'json' };
 import { createActionRegistry } from '../../src/actions/index.ts';
-import { Announcer } from '../../src/announce/announce.ts';
+import { AnnouncementScheduler } from '../../src/announce/scheduler.ts';
 import { createApp } from '../../src/app.ts';
 import { ensureRuntimeDirectories, loadSettings } from '../../src/config/load.ts';
 import { SonosSystem } from '../../src/discovery/sonos-system.ts';
@@ -108,7 +108,7 @@ export async function bootLive(): Promise<LiveStack | undefined> {
     presets,
     tts: createTtsService(settings, { logger }),
     clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
-    announcer: new Announcer({ system, logger }),
+    announcer: new AnnouncementScheduler({ system, logger, ...settings.announce }),
     hub,
     logger,
     version: `${pkg.version}-live`,

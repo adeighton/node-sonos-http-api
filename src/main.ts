@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 
 import pkg from '../package.json' with { type: 'json' };
 import { createActionRegistry } from './actions/index.ts';
-import { Announcer } from './announce/announce.ts';
+import { AnnouncementScheduler } from './announce/scheduler.ts';
 import { createApp } from './app.ts';
 import { ConfigError } from './config/errors.ts';
 import { ensureRuntimeDirectories, loadSettings } from './config/load.ts';
@@ -20,6 +20,7 @@ import { startServer } from './server.ts';
 import { createClipLibrary } from './tts/clips.ts';
 import { createTtsService } from './tts/index.ts';
 
+/** Time allowed for teardown after the announcement drain before the process is forced out. */
 const SHUTDOWN_GRACE_MS = 5000;
 
 async function main(): Promise<void> {
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
     webhook: createWebhookNotifier({ settings, logger }),
   });
 
+  const scheduler = new AnnouncementScheduler({ system, logger, ...settings.announce });
   const app = createApp({
     system,
     settings,
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
     presets,
     tts: createTtsService(settings, { logger }),
     clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
-    announcer: new Announcer({ system, logger }),
+    announcer: scheduler,
     hub,
     logger,
     version: pkg.version,
@@ -99,7 +101,12 @@ async function main(): Promise<void> {
 
     shuttingDown = true;
     logger.info({ signal }, 'shutting down');
-    setTimeout(() => process.exit(1), SHUTDOWN_GRACE_MS).unref();
+    setTimeout(
+      () => process.exit(1),
+      settings.announce.shutdownDrainMs + SHUTDOWN_GRACE_MS,
+    ).unref();
+    // Stop and restore a playing announcement first, so no room is left on the clip.
+    await scheduler.drain(settings.announce.shutdownDrainMs);
     unwire();
     hub.close();
     presets.close();

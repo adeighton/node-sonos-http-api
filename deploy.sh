@@ -107,8 +107,10 @@ User=${SERVER_USER}
 WorkingDirectory=/home/${SERVER_USER}/${REMOTE_DIRECTORY}
 Environment=NODE_ENV=production
 ExecStart=${REMOTE_NODE_PATH} --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/main.ts
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=5
+# Longer than announce.shutdownDrainMs + 5 s, so a playing announcement is restored before exit.
+TimeoutStopSec=25
 StandardOutput=journal
 StandardError=journal
 
