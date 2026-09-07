@@ -7,7 +7,7 @@ import { BadRequestError, NotFoundError } from '../http/errors.ts';
 import { PresetStore } from '../presets/store.ts';
 import { createActionContext } from '../testing/action-context.ts';
 import { withTempDir } from '../testing/with-temp-dir.ts';
-import { parseSayArguments, registerAnnounceActions } from './announce.ts';
+import { parseSayArguments, registerAnnounceActions, textPreview } from './announce.ts';
 import { ActionRegistry } from './registry.ts';
 
 function registry() {
@@ -57,6 +57,14 @@ describe('parseSayArguments', () => {
   });
 });
 
+describe('textPreview', () => {
+  it('keeps the first line, shortened to 120 characters', () => {
+    assert.equal(textPreview('  Good morning.\nSecond paragraph'), 'Good morning.');
+    assert.equal(textPreview('x'.repeat(130)), `${'x'.repeat(119)}…`);
+    assert.equal(textPreview(''), '');
+  });
+});
+
 describe('say actions', () => {
   it('say speaks the phrase on the room at the volume and answers with the result', async () => {
     const { context, announcer, spoken, player } = createActionContext();
@@ -68,6 +76,7 @@ describe('say actions', () => {
     assert.equal(spec?.volume, 35);
     assert.equal(spec?.source, 'say');
     assert.equal(spec?.requestId, context.requestId);
+    assert.equal(spec?.textPreview, 'Dinner is ready');
     assert.deepEqual(spoken, [], 'speech is only synthesized when the announcement prepares');
     assert.deepEqual(await spec?.prepare(), {
       uri: 'http://127.0.0.1:5005/tts/Dinner%20is%20ready.mp3',
@@ -101,6 +110,7 @@ describe('say actions', () => {
 
       const [byPreset, atVolume, both] = announcer.calls;
       assert.equal(byPreset?.target.kind, 'preset');
+      assert.equal(byPreset?.target.kind === 'preset' && byPreset.target.name, 'doorbell');
       assert.equal(byPreset?.volume, undefined, 'volumes come from the preset');
       assert.equal(atVolume?.volume, 50);
       assert.equal(both?.volume, 50);
@@ -124,6 +134,7 @@ describe('clip actions', () => {
     assert.deepEqual(room?.target, { kind: 'player', player });
     assert.equal(room?.volume, 50);
     assert.equal(room?.source, 'clip');
+    assert.equal(room?.textPreview, 'ding dong.mp3');
     assert.deepEqual(await room?.prepare(), {
       uri: 'http://127.0.0.1:5005/clips/ding%20dong.mp3',
       durationMs: 2500,

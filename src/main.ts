@@ -12,6 +12,7 @@ import { ConfigError } from './config/errors.ts';
 import { ensureRuntimeDirectories, loadSettings } from './config/load.ts';
 import { SonosSystem } from './discovery/sonos-system.ts';
 import { EventHub } from './http/events.ts';
+import { AnnouncementHistory } from './history/sqlite.ts';
 import { wireSystemEvents } from './http/system-events.ts';
 import { createWebhookNotifier } from './http/webhook.ts';
 import { createLogger } from './logger.ts';
@@ -61,6 +62,11 @@ async function main(): Promise<void> {
   });
 
   const scheduler = new AnnouncementScheduler({ system, logger, ...settings.announce });
+  const history = AnnouncementHistory.open(
+    settings.history.enabled ? join(settings.cacheDir, 'announcements.sqlite') : ':memory:',
+    { logger, retentionDays: settings.history.retentionDays },
+  );
+  const unfollow = history.follow(scheduler);
   const app = createApp({
     system,
     settings,
@@ -112,6 +118,8 @@ async function main(): Promise<void> {
     presets.close();
     await server.close();
     await system.dispose();
+    unfollow();
+    history.close();
     logger.info('bye');
     process.exitCode = 0;
   };

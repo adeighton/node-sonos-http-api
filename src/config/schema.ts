@@ -52,6 +52,13 @@ export const settingsSchema = z.object({
       shutdownDrainMs: 15_000,
       resumeRewindMs: 1000,
     }),
+  history: z
+    .object({
+      /** Keep announcement records in `<cacheDir>/announcements.sqlite`; off keeps them in memory. */
+      enabled: z.union([z.boolean(), z.stringbool()]).default(true),
+      retentionDays: z.coerce.number().int().min(1).default(90),
+    })
+    .default({ enabled: true, retentionDays: 90 }),
   cacheDir: z.string().min(1).default('cache'),
   webroot: z.string().min(1).default('static'),
   presetDir: z.string().min(1).default('presets'),

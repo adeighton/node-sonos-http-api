@@ -1,7 +1,7 @@
 import type { Player, Zone } from '../discovery/player.ts';
 import type { Preset, PresetPlayer } from '../discovery/types.ts';
 import { BadRequestError, ServiceUnavailableError } from '../http/errors.ts';
-import type { AnnounceSystem, AnnouncementSpec } from './types.ts';
+import type { AnnounceSystem, AnnounceTarget, AnnouncementSpec } from './types.ts';
 
 export interface AnnouncementPlan {
   /** The player whose transport plays the clip and whose state signals its end. */
@@ -33,6 +33,20 @@ function groupedExactly(coordinator: Player, players: Player[]): (zones: Zone[])
 
 function withVolume(players: PresetPlayer[], volume: number | undefined): PresetPlayer[] {
   return volume === undefined ? players : players.map((player) => ({ ...player, volume }));
+}
+
+/** A short label for logs and the history: `all`, `preset:doorbell`, `room:Kitchen`, `rooms:A,B`. */
+export function describeTarget(target: AnnounceTarget): string {
+  switch (target.kind) {
+    case 'player':
+      return `room:${target.player.roomName}`;
+    case 'all':
+      return 'all';
+    case 'rooms':
+      return `rooms:${target.rooms.map((room) => room.player.roomName).join(',')}`;
+    case 'preset':
+      return `preset:${target.name ?? target.preset.players.map((p) => p.roomName).join(',')}`;
+  }
 }
 
 /** Decides which players take part, who leads them and what the group should look like. */

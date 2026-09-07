@@ -34,14 +34,23 @@ export function parseSayArguments(
   return { phrase, voice: undefined, volume: parseVolume(second, defaultVolume) };
 }
 
-function requirePreset(context: ActionContext, name: string | undefined): Preset {
+function requirePreset(
+  context: ActionContext,
+  name: string | undefined,
+): { kind: 'preset'; preset: Preset; name: string } {
   const presetName = requireValue(name, 'preset name');
   const preset = context.presets.get(presetName);
   if (!preset) {
     throw new NotFoundError(`No preset named '${presetName}'`);
   }
 
-  return preset;
+  return { kind: 'preset', preset, name: presetName };
+}
+
+/** The first line of a phrase, shortened, for the history. */
+export function textPreview(text: string): string {
+  const line = text.trim().split(/\r?\n/, 1)[0] ?? '';
+  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 }
 
 function speech(context: ActionContext, args: SayArguments): () => Promise<PreparedClip> {
@@ -70,7 +79,7 @@ async function announce(
   context: ActionContext,
   source: string,
   target: AnnounceTarget,
-  spec: Pick<AnnouncementSpec, 'prepare' | 'volume'>,
+  spec: Pick<AnnouncementSpec, 'prepare' | 'volume' | 'textPreview'>,
 ): Promise<unknown> {
   const handle = context.announcer.submit({
     ...spec,
@@ -88,7 +97,7 @@ const say: Action = async (context, values) => {
     context,
     'say',
     { kind: 'player', player: context.player },
-    { prepare: speech(context, args), volume: args.volume },
+    { prepare: speech(context, args), volume: args.volume, textPreview: textPreview(args.phrase) },
   );
 };
 
@@ -99,20 +108,19 @@ const sayAll: Action = async (context, values) => {
     context,
     'sayall',
     { kind: 'all' },
-    { prepare: speech(context, args), volume: args.volume },
+    { prepare: speech(context, args), volume: args.volume, textPreview: textPreview(args.phrase) },
   );
 };
 
 /** `/saypreset/{preset}/{phrase}[/{voice}][/{volume}]`: the preset's volumes unless one is given. */
 const sayPreset: Action = async (context, values) => {
-  const preset = requirePreset(context, values[0]);
+  const target = requirePreset(context, values[0]);
   const args = parseSayArguments(values.slice(1), undefined);
-  return announce(
-    context,
-    'saypreset',
-    { kind: 'preset', preset },
-    { prepare: speech(context, args), volume: args.volume },
-  );
+  return announce(context, 'saypreset', target, {
+    prepare: speech(context, args),
+    volume: args.volume,
+    textPreview: textPreview(args.phrase),
+  });
 };
 
 /** `/{room}/clip/{file}[/{volume}]` */
@@ -124,6 +132,7 @@ const clip: Action = async (context, values) =>
     {
       prepare: await clipFile(context, values[0]),
       volume: parseVolume(values[1], context.settings.announceVolume),
+      textPreview: values[0],
     },
   );
 
@@ -136,18 +145,18 @@ const clipAll: Action = async (context, values) =>
     {
       prepare: await clipFile(context, values[0]),
       volume: parseVolume(values[1], context.settings.announceVolume),
+      textPreview: values[0],
     },
   );
 
 /** `/clippreset/{preset}/{file}[/{volume}]` */
 const clipPreset: Action = async (context, values) => {
-  const preset = requirePreset(context, values[0]);
-  return announce(
-    context,
-    'clippreset',
-    { kind: 'preset', preset },
-    { prepare: await clipFile(context, values[1]), volume: parseVolume(values[2], undefined) },
-  );
+  const target = requirePreset(context, values[0]);
+  return announce(context, 'clippreset', target, {
+    prepare: await clipFile(context, values[1]),
+    volume: parseVolume(values[2], undefined),
+    textPreview: values[1],
+  });
 };
 
 export function registerAnnounceActions(registry: ActionRegistry): void {

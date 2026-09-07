@@ -113,6 +113,7 @@ export class AnnouncementScheduler extends EventEmitter<SchedulerEvents> {
       this.#queue.push(runner);
     }
 
+    runner.notifyQueued();
     this.#pump();
     this.#preemptIfUrgentWaits();
     return runner;

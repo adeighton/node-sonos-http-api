@@ -3,7 +3,7 @@ import { errorMessage } from '../http/errors.ts';
 import type { Logger } from '../logger.ts';
 import { deferred } from '../util/deferred.ts';
 import type { Deferred } from '../util/deferred.ts';
-import { planAnnouncement } from './plan.ts';
+import { describeTarget, planAnnouncement } from './plan.ts';
 import type { AnnouncementPlan } from './plan.ts';
 import { captureRestorePlan, runRestore } from './restore.ts';
 import type { RestorePlan } from './restore.ts';
@@ -62,6 +62,7 @@ export class AnnouncementRunner implements AnnouncementHandle {
   readonly #timings: StageTimings = { totalMs: 0 };
   readonly #settled: Deferred<AnnouncementResult>;
   #interruptions = 0;
+  #rooms: string[] | undefined;
   /** Aborts the current wait for the end of the clip (cancel or interrupt). */
   #waiter: AbortController | undefined;
   #interruptRequested = false;
@@ -81,6 +82,11 @@ export class AnnouncementRunner implements AnnouncementHandle {
     });
     // Nobody may ever await the clip (cancelled while queued); the error surfaces in start().
     this.#clip.catch(() => undefined);
+  }
+
+  /** Announces the initial `queued` state; the scheduler calls it once the runner is registered. */
+  notifyQueued(): void {
+    this.#transition('queued');
   }
 
   /** Runs the announcement; resolves with the result or rejects with what stopped it. */
@@ -142,6 +148,7 @@ export class AnnouncementRunner implements AnnouncementHandle {
     }
 
     const rooms = plan.preset.players.map((player) => player.roomName);
+    this.#rooms = rooms;
     let clip: PreparedClip | undefined;
     let failure: unknown;
     try {
@@ -371,7 +378,7 @@ export class AnnouncementRunner implements AnnouncementHandle {
     state: AnnouncementState,
     extra: Pick<AnnouncementTransition, 'result' | 'error'> = {},
   ): void {
-    const previousState = this.state;
+    const previousState = state === 'queued' ? undefined : this.state;
     this.state = state;
     this.#options.onTransition({
       id: this.id,
@@ -379,8 +386,12 @@ export class AnnouncementRunner implements AnnouncementHandle {
       previousState,
       source: this.spec.source,
       priority: this.spec.priority ?? 'normal',
+      target: describeTarget(this.spec.target),
+      textPreview: this.spec.textPreview,
       requestId: this.spec.requestId,
+      idempotencyKey: this.spec.idempotencyKey,
       at: Date.now(),
+      rooms: this.#rooms,
       ...extra,
     });
   }

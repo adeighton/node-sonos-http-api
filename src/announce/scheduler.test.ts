@@ -92,7 +92,9 @@ describe('AnnouncementScheduler', () => {
     assert.deepEqual(
       transitions.map((t) => `${t.id === first.id ? 'first' : 'second'}:${t.state}`),
       [
+        'first:queued',
         'first:starting',
+        'second:queued',
         'first:playing',
         'first:restoring',
         'first:done',
@@ -239,10 +241,13 @@ describe('AnnouncementScheduler', () => {
       assert.deepEqual(actions, ['Pause', 'GetPositionInfo', 'Seek', 'Play']);
       assert.deepEqual(
         transitions.filter((t) => t.id === normal.id).map((t) => t.state),
-        ['starting', 'playing', 'interrupted', 'playing', 'restoring', 'done'],
+        ['queued', 'starting', 'playing', 'interrupted', 'playing', 'restoring', 'done'],
       );
       assert.equal((await normal.done).interruptions, 1);
       assert.equal((await urgent.done).priority, 'urgent');
+      const queued = transitions.find((t) => t.id === urgent.id);
+      assert.equal(queued?.previousState, undefined);
+      assert.equal(queued?.target, 'room:Office');
     });
 
     it('an urgent one that arrives while the normal one is still starting waits for it to play', async () => {

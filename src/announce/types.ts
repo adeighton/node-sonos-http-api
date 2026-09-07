@@ -13,7 +13,7 @@ export interface AnnounceSystem {
 export type AnnounceTarget =
   | { kind: 'player'; player: Player }
   | { kind: 'all' }
-  | { kind: 'preset'; preset: Preset }
+  | { kind: 'preset'; preset: Preset; name?: string | undefined }
   /** An ad-hoc set of rooms, the first one leading; a room's own volume wins over the spec's. */
   | { kind: 'rooms'; rooms: Array<{ player: Player; volume?: number | undefined }> };
 
@@ -40,7 +40,11 @@ export interface AnnouncementSpec {
   prepare: () => Promise<PreparedClip>;
   /** What asked for the announcement (`say`, `clip`, ...), for logs and results. */
   source: string;
+  /** The start of the text, or the clip name, for the history. */
+  textPreview?: string | undefined;
   requestId?: string | undefined;
+  /** A caller's key for "do not play this twice" (see POST /announce). */
+  idempotencyKey?: string | undefined;
 }
 
 export type AnnouncementState =
@@ -89,14 +93,22 @@ export interface AnnouncementHandle {
   cancel(): void;
 }
 
+/** One state change of an announcement, with what the history and event clients need. */
 export interface AnnouncementTransition {
   id: string;
   state: AnnouncementState;
-  previousState: AnnouncementState;
+  /** Absent on `queued`, the first state. */
+  previousState: AnnouncementState | undefined;
   source: string;
   priority: AnnouncementPriority;
+  /** See `describeTarget`. */
+  target: string;
+  textPreview?: string | undefined;
   requestId?: string | undefined;
+  idempotencyKey?: string | undefined;
   at: number;
+  /** Known once the announcement has been planned. */
+  rooms?: string[] | undefined;
   /** With `done` and `cancelled`. */
   result?: AnnouncementResult | undefined;
   /** With `failed`. */

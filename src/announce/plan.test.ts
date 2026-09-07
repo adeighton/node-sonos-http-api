@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { BadRequestError, ServiceUnavailableError } from '../http/errors.ts';
 import { FakeSystem } from '../testing/fake-system.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
-import { planAnnouncement } from './plan.ts';
+import { describeTarget, planAnnouncement } from './plan.ts';
 
 function house() {
   const system = new FakeSystem();
@@ -151,6 +151,19 @@ describe('planAnnouncement', () => {
       () => planAnnouncement(system, { target: { kind: 'rooms', rooms: [] } }),
       BadRequestError,
     );
+  });
+
+  it('describes a target in a word for logs and the history', () => {
+    const { kitchen, office } = house();
+    assert.equal(describeTarget({ kind: 'player', player: kitchen }), 'room:Kitchen');
+    assert.equal(describeTarget({ kind: 'all' }), 'all');
+    assert.equal(
+      describeTarget({ kind: 'rooms', rooms: [{ player: kitchen }, { player: office }] }),
+      'rooms:Kitchen,Office',
+    );
+    const preset = { players: [{ roomName: 'Kitchen' }] };
+    assert.equal(describeTarget({ kind: 'preset', preset, name: 'doorbell' }), 'preset:doorbell');
+    assert.equal(describeTarget({ kind: 'preset', preset }), 'preset:Kitchen');
   });
 
   it('rejects a preset whose first room is unknown or missing', () => {
