@@ -1,3 +1,4 @@
+import { isPausable } from '../discovery/apply-preset.ts';
 import type { Player, Zone } from '../discovery/player.ts';
 import { withTransientRetry } from '../discovery/retry.ts';
 import type { Preset } from '../discovery/types.ts';
@@ -112,7 +113,7 @@ export function captureRestorePlan(system: AnnounceSystem, plan: AnnouncementPla
     const leaving = zone.members.filter(isTarget);
     const staying = zone.members.filter((member) => !isTarget(member));
     if (leaving.length === 0) {
-      if (plan.preset.pauseOthers && coordinator.state.playbackState === 'PLAYING') {
+      if (plan.preset.pauseOthers && isPausable(coordinator)) {
         steps.push({ kind: 'resume', room: coordinator.roomName });
       }
     } else if (!isTarget(coordinator)) {

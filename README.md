@@ -494,7 +494,9 @@ one clip, so a briefing of several thousand characters is fine (Polly alone stop
 `sayall` groups every player, sets the announce volume (40% by default) and restores the previous
 grouping, volumes and playback afterwards. `saypreset` does the same on the players of a preset,
 at the preset's volumes unless a volume is given, and pauses the other groups only if the preset
-says `pauseOthers: true` (the default). Announcements are played one at a time: overlapping
+says `pauseOthers: true` (the default). A room that is playing its TV input is never paused (Sonos
+would refuse anyway) and `sayall` / `clipall` leave it out, so the film goes on; name the room in a
+preset or a rooms list to announce there regardless. An idle TV room hears everything. Announcements are played one at a time: overlapping
 requests queue up instead of interrupting each other; when more than `announce.maxQueued`
 (10) are waiting the request is refused with 503 and a `Retry-After` header.
 
@@ -553,7 +555,8 @@ doorbell), there is a JSON API. Everything goes through the same queue, so a `PO
   when a normal one is playing, pauses it; the normal one carries on from a second before the
   pause once every urgent one is done. Urgent never interrupts urgent.
 * `pauseOthers`: pause the groups not taking part (default: the preset's setting, else false for
-  rooms). Only groups that are actually playing are paused, and they are resumed afterwards.
+  rooms). Only groups that are actually playing are paused, and they are resumed afterwards. A room
+  playing its TV input is never paused, and `"all"` leaves it out.
 * `idempotencyKey` (or an `Idempotency-Key` header): the same key within
   `announce.idempotencyWindowMs` (10 minutes) is not played again; the earlier announcement's
   record is returned with 200 and `Idempotent-Replayed: true`. Use the date for a daily briefing

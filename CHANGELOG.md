@@ -58,6 +58,10 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
   captured and restored every zone, whether it took part or not. Only zones that are actually
   playing are paused, and only the rooms an announcement touched are restored: a player that
   left a group rejoins it, a paused group gets one `play`, everything else is left alone.
+- A room playing its TV input is left alone: never paused by `pauseOthers` (Sonos refuses, and
+  the old code silently ignored that) and skipped by `sayall` / `clipall` / `"target": "all"`,
+  which used to pull the TV into the announcement group and could leave it on the clip. Naming
+  the room still announces there.
 - Faster: text-to-speech starts at submission and overlaps the regrouping; joins, volumes and
   pauses go out four at a time; the end of the clip is detected from the player's first event
   rather than after album-art lookups; a player that already stands alone is no longer told to

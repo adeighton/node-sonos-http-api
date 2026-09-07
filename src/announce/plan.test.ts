@@ -70,6 +70,42 @@ describe('planAnnouncement', () => {
     );
   });
 
+  it('leaves a room that is watching TV out of "all", but not an idle TV or a room asked for by name', async () => {
+    const { system, kitchen, office, den } = house();
+    await den.handleLastChange({
+      transportstate: { val: 'PLAYING' },
+      avtransporturi: { val: 'x-sonos-htastream:RINCON_D:spdif' },
+    });
+
+    const plan = planAnnouncement(system, { target: { kind: 'all' }, volume: 30 });
+    assert.deepEqual(
+      plan.preset.players.map((p) => p.roomName),
+      ['Kitchen', 'Office'],
+    );
+    assert.equal(
+      plan.expectedTopology([
+        { uuid: 'RINCON_K', id: 'x', coordinator: kitchen, members: [kitchen, office] },
+        { uuid: 'RINCON_D', id: 'y', coordinator: den, members: [den] },
+      ]),
+      true,
+      'the TV keeps its own group',
+    );
+
+    const byName = planAnnouncement(system, { target: { kind: 'player', player: den } });
+    assert.deepEqual(byName.preset.players, [{ roomName: 'Den', volume: undefined }]);
+
+    await den.handleLastChange({ transportstate: { val: 'STOPPED' } });
+    const idle = planAnnouncement(system, { target: { kind: 'all' } });
+    assert.equal(idle.preset.players.length, 3, 'an idle TV hears the announcement');
+
+    system.zones = system.zones.filter((zone) => zone.uuid === 'RINCON_D');
+    await den.handleLastChange({ transportstate: { val: 'PLAYING' } });
+    assert.throws(
+      () => planAnnouncement(system, { target: { kind: 'all' } }),
+      ServiceUnavailableError,
+    );
+  });
+
   it('plans a preset with its rooms and volumes, honouring its pauseOthers', () => {
     const { system, kitchen, office } = house();
     const preset = {

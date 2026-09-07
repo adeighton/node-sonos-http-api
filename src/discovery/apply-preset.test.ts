@@ -5,7 +5,7 @@ import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
 import { deferred, fakePresetPlayer } from '../testing/fake-player.ts';
 import type { FakePresetPlayer } from '../testing/fake-player.ts';
-import { applyPreset } from './apply-preset.ts';
+import { applyPreset, isPausable, playsTvAudio } from './apply-preset.ts';
 import type { PresetSystem } from './apply-preset.ts';
 import { ArgumentError, RequestTimeoutError } from './errors.ts';
 import type { Preset } from './types.ts';
@@ -334,6 +334,19 @@ describe('applyPreset', () => {
 
     assert.equal(otherPlayer.pause.mock.callCount(), 1, 'the playing zone is paused');
     assert.equal(idle.pause.mock.callCount(), 0, 'a stopped zone is left alone');
+  });
+
+  it('never pauses a player that is playing its TV input', async () => {
+    const { system, otherPlayer } = groupedSystem();
+    otherPlayer.avTransportUri = 'x-sonos-htastream:RINCON_1000000001400:spdif';
+    assert.equal(playsTvAudio(otherPlayer), true);
+    assert.equal(isPausable(otherPlayer), false);
+
+    await applyPreset(system, { ...fullPreset(), pauseOthers: true });
+
+    assert.equal(otherPlayer.pause.mock.callCount(), 0, 'the film goes on');
+    otherPlayer.state.playbackState = 'STOPPED';
+    assert.equal(playsTvAudio(otherPlayer), false, 'an idle TV input is not "watching TV"');
   });
 
   it('issues member joins, volumes and pauses concurrently, in the documented order', async () => {

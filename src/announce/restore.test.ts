@@ -194,6 +194,16 @@ describe('captureRestorePlan', () => {
     const e = await playing(system, 'E', 'RINCON_E', 30, 'x-rincon-queue:RINCON_E#0', 'PLAYING');
     system.addStandalone(e.player);
     // Zone 4: F is stopped and not a target → untouched.
+    // Zone 5: G is watching TV → never paused, so nothing to resume.
+    const g = await playing(
+      system,
+      'G',
+      'RINCON_G',
+      30,
+      'x-sonos-htastream:RINCON_G:spdif',
+      'PLAYING',
+    );
+    system.addStandalone(g.player);
     const f = await playing(system, 'F', 'RINCON_F', 30, 'x-rincon-queue:RINCON_F#0', 'STOPPED');
     system.addStandalone(f.player);
     const preset: Preset = {

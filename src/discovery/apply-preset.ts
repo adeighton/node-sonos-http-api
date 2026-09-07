@@ -51,6 +51,23 @@ function resolvePlayers(system: PresetSystem, preset: Preset): PresetTarget[] {
   });
 }
 
+/**
+ * A home-theatre player playing its TV input. Sonos refuses to pause it, and nobody wants the
+ * film interrupted by the house-wide announcement, so it is neither paused nor swept up by an
+ * "every room" announcement; asking for the room by name still works.
+ */
+export function playsTvAudio(player: Pick<PresetTarget, 'avTransportUri' | 'state'>): boolean {
+  return (
+    player.avTransportUri.startsWith('x-sonos-htastream:') &&
+    player.state.playbackState === 'PLAYING'
+  );
+}
+
+/** Zones `pauseOthers` may pause: playing, and not a TV. */
+export function isPausable(player: Pick<PresetTarget, 'avTransportUri' | 'state'>): boolean {
+  return player.state.playbackState === 'PLAYING' && !playsTvAudio(player);
+}
+
 /** Players are independent devices: commands to different players go out at once, a few at a time. */
 const PLAYER_CONCURRENCY = 4;
 
@@ -115,7 +132,7 @@ async function ungroupFromCoordinator(
   });
 }
 
-/** Pauses every other group that is actually playing; a refusal is not worth failing over. */
+/** Pauses every other group that is playing (TVs excepted); a refusal is not worth failing over. */
 async function pauseOthers(
   system: PresetSystem,
   players: PresetTarget[],
@@ -123,7 +140,7 @@ async function pauseOthers(
 ): Promise<void> {
   const presetUuids = new Set(players.map((player) => player.uuid));
   const playing = system.zones.filter(
-    (zone) => !presetUuids.has(zone.uuid) && zone.coordinator.state.playbackState === 'PLAYING',
+    (zone) => !presetUuids.has(zone.uuid) && isPausable(zone.coordinator),
   );
   await mapLimit(playing, PLAYER_CONCURRENCY, async (zone) => {
     logger.debug({ room: zone.coordinator.roomName }, 'pausing');

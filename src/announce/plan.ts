@@ -1,3 +1,4 @@
+import { playsTvAudio } from '../discovery/apply-preset.ts';
 import type { Player, Zone } from '../discovery/player.ts';
 import type { Preset, PresetPlayer } from '../discovery/types.ts';
 import { BadRequestError, ServiceUnavailableError } from '../http/errors.ts';
@@ -68,13 +69,17 @@ export function planAnnouncement(
         expectedTopology: groupedExactly(target.player, [target.player]),
       };
     case 'all': {
-      const biggest = [...system.zones].sort((a, b) => b.members.length - a.members.length)[0];
+      // A room watching TV is left out; everything else joins the biggest remaining group.
+      const zones = system.zones.filter((zone) => !playsTvAudio(zone.coordinator));
+      const biggest = [...zones].sort((a, b) => b.members.length - a.members.length)[0];
       if (!biggest) {
         throw new ServiceUnavailableError('No Sonos players are available for the announcement');
       }
 
       const coordinator = biggest.coordinator;
-      const others = system.players.filter((player) => player.uuid !== coordinator.uuid);
+      const others = zones
+        .flatMap((zone) => zone.members)
+        .filter((player) => player.uuid !== coordinator.uuid);
       const players = [coordinator, ...others];
       return {
         coordinator,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import type { AnnouncementResult } from '../../src/announce/types.ts';
-import type { LiveHarness } from '../../src/testing/live-harness.ts';
+import { LiveHarness } from '../../src/testing/live-harness.ts';
 import { describeLive } from './boot.ts';
 
 const CLIP = 'TacoBellBong.mp3';
@@ -11,6 +11,19 @@ const PRESET = process.env.SONOS_LIVE_PRESET ?? 'firstfloor';
 
 async function everyRoom(harness: LiveHarness): Promise<string[]> {
   return (await harness.zones()).flatMap((zone) => zone.members.map((m) => m.roomName));
+}
+
+/** Rooms playing their TV input right now; an "every room" announcement must leave them alone. */
+async function watchingTv(harness: LiveHarness): Promise<string[]> {
+  return (await harness.zones()).flatMap((zone) =>
+    zone.members
+      .filter(
+        (m) =>
+          m.state.currentTrack.uri.startsWith('x-sonos-htastream:') &&
+          m.state.playbackState === 'PLAYING',
+      )
+      .map((m) => m.roomName),
+  );
 }
 
 function ttsConfigured(): boolean {
@@ -71,13 +84,23 @@ describeLive('announcement actions (live)', ({ it }) => {
     assert.equal((await harness.action(room, 'clip', '../secret.mp3')).status, 400);
   });
 
-  it('clipall and sayall reach every room and restore the whole house', async ({ harness }, t) => {
+  it('clipall and sayall reach every room but one watching TV, and restore the whole house', async ({
+    harness,
+  }, t) => {
     const rooms = await everyRoom(harness);
+    const tvRooms = await watchingTv(harness);
+    if (tvRooms.length === 0) {
+      t.diagnostic('no room is playing TV audio; the TV rule is not exercised in this run');
+    }
+    const tvBefore = await harness.snapshot(tvRooms);
+    const expected = rooms.filter((room) => !tvRooms.includes(room));
     await harness.withRestore(async (before) => {
       const clip = await harness.get(`/clipall/${CLIP}/${VOLUME}`);
       assert.equal(clip.status, 200, JSON.stringify(clip.body));
-      announced(clip.body, rooms);
+      announced(clip.body, expected);
       await harness.assertRestored(before);
+      // Transport and playback state included: the film was neither joined nor stopped.
+      assert.deepEqual(LiveHarness.differences(tvBefore, await harness.snapshot(tvRooms)), []);
 
       if (!ttsConfigured()) {
         t.diagnostic('sayall skipped: AWS credentials are not configured');
@@ -88,8 +111,9 @@ describeLive('announcement actions (live)', ({ it }) => {
         `/sayall/${encodeURIComponent('Live test, all rooms')}/${VOLUME}`,
       );
       assert.equal(say.status, 200, JSON.stringify(say.body));
-      announced(say.body, rooms);
+      announced(say.body, expected);
       await harness.assertRestored(before);
+      assert.deepEqual(LiveHarness.differences(tvBefore, await harness.snapshot(tvRooms)), []);
     }, rooms);
   });
 
