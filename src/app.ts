@@ -10,6 +10,8 @@ import { streamSSE } from 'hono/streaming';
 
 import type { ActionRegistry, ActionSystem, AnnouncerLike } from './actions/registry.ts';
 import type { Settings } from './config/schema.ts';
+import { createAnnounceRoutes } from './http/announce-routes.ts';
+import type { HistoryLike } from './http/announce-routes.ts';
 import { decodePathSegments, resolveRequest, runAction } from './http/dispatch.ts';
 import { HttpError, errorBody, statusForError } from './http/errors.ts';
 import type { EventHub } from './http/events.ts';
@@ -27,6 +29,7 @@ export interface AppDeps {
   tts: TtsService;
   clips: ClipLibrary;
   announcer: AnnouncerLike;
+  history: HistoryLike;
   hub: EventHub;
   logger: Logger;
   version: string;
@@ -82,7 +85,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }
   app.get('/tts/*', (c) => c.json(errorBody(new Error('No such clip')), 404));
   app.get('/clips/*', (c) => c.json(errorBody(new Error('No such clip')), 404));
 
-  app.use('*', cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'] }));
+  app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'] }));
 
   if (settings.auth) {
     app.use(
@@ -115,6 +118,22 @@ export function createApp(deps: AppDeps): Hono<{ Variables: RequestIdVariables }
       deps.hub.add(client);
       await new Promise<void>((resolve) => stream.onAbort(resolve));
       deps.hub.remove(client);
+    }),
+  );
+
+  // The JSON announcement API, ahead of the catch-all action routes.
+  app.route(
+    '/',
+    createAnnounceRoutes({
+      system: deps.system,
+      presets: deps.presets,
+      tts: deps.tts,
+      clips: deps.clips,
+      announcer: deps.announcer,
+      history: deps.history,
+      logger,
+      idempotencyWindowMs: settings.announce.idempotencyWindowMs,
+      publicBaseUrl: deps.publicBaseUrl,
     }),
   );
 

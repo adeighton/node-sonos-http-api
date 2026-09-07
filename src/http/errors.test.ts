@@ -14,6 +14,7 @@ import {
 } from '../discovery/errors.ts';
 import {
   BadGatewayError,
+  ConflictError,
   BadRequestError,
   HttpError,
   NotFoundError,
@@ -54,6 +55,7 @@ describe('http errors', () => {
     assert.equal(statusForError(new HTTPException(401, { message: 'Unauthorized' })), 401);
     assert.equal(statusForError(new ItemNotFoundError('Favorite not found')), 404);
     assert.equal(statusForError(new NotCoordinatorError('Kitchen')), 409);
+    assert.equal(statusForError(new ConflictError('already done')), 409);
     assert.equal(statusForError(new RequestTimeoutError('http://p', 10)), 504);
     assert.equal(statusForError(new RequestFailedError('http://p', 500, 'x', '')), 502);
     assert.equal(statusForError(new SoapFaultError('http://p', 'Play', 701, 'nope', '')), 502);

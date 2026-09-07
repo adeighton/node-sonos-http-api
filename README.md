@@ -163,10 +163,11 @@ Errors answer `{"status":"error","error":"<message>"}` with a meaningful status 
 
 | Status | When                                                          |
 | ------ | ------------------------------------------------------------- |
-| 400    | Bad input: unknown sub-action, non-numeric volume, bad encoding |
-| 404    | Unknown action, room, preset, favorite, playlist or clip        |
-| 405    | Anything but `GET` (the response carries `Allow: GET`)          |
-| 409    | The command needs a group coordinator and this room is not one  |
+| 400    | Bad input: unknown sub-action, non-numeric volume, bad encoding, an invalid JSON body |
+| 404    | Unknown action, room, preset, favorite, playlist, clip or announcement |
+| 405    | A method an action path does not take (the response carries `Allow: GET`) |
+| 409    | The command needs a group coordinator and this room is not one; cancelling an announcement that has already finished |
+| 413    | A `POST` body over 64 KB                                        |
 | 500    | A bug in this server (please report it with the log line)       |
 | 502    | The player (or a music service) refused the command; the message carries the UPnP error code and its meaning, e.g. `Seek was rejected by the player: UPnP error 711 (Illegal seek target: no such track or position)` |
 | 503    | No Sonos system has been discovered yet, or TTS is not configured |
@@ -513,6 +514,70 @@ or synthesize the clip (a few milliseconds on a cache hit), `topologyMs` the wai
 to regroup, `playMs` the clip itself. Every response carries an `X-Request-Id` header (yours is
 echoed back when you send one) and the same id is on every log line of that request, which makes
 "did the 7am briefing play?" a one-line journal search.
+
+Announcement API (JSON)
+-----------------------
+
+The `say*` and `clip*` actions above hold the request open until the rooms are restored. For a
+client that would rather hand an announcement over and get on with its day (a daily briefing, a
+doorbell), there is a JSON API. Everything goes through the same queue, so a `POST` and a
+`/say` never talk over each other.
+
+    POST /announce
+
+```json
+{
+  "text": "Good morning. Today is Monday…",
+  "target": { "preset": "firstfloor" },
+  "voice": "Joanna",
+  "engine": "neural",
+  "priority": "normal",
+  "idempotencyKey": "briefing-2026-09-07",
+  "wait": false
+}
+```
+
+* Exactly one of `text` (read as given), `ssml` (a `<speak>` document) or `clip` (a file in
+  `static/clips`).
+* `target`: `"all"`, `{ "preset": "<name>" }`, or rooms in the order they should group, the
+  first one leading: `["1. Kitchen", { "name": "1. Dining Room", "volume": 20 }]` (or
+  `{ "rooms": [...] }`). A room's own `volume` beats the request's `volume`, which beats the
+  preset's volumes, which beat `announceVolume`.
+* `priority`: `normal` (default) or `urgent`. An urgent announcement goes ahead of the queue and,
+  when a normal one is playing, pauses it; the normal one carries on from a second before the
+  pause once every urgent one is done. Urgent never interrupts urgent.
+* `pauseOthers`: pause the groups not taking part (default: the preset's setting, else false for
+  rooms). Only groups that are actually playing are paused, and they are resumed afterwards.
+* `idempotencyKey` (or an `Idempotency-Key` header): the same key within
+  `announce.idempotencyWindowMs` (10 minutes) is not played again; the earlier announcement's
+  record is returned with 200 and `Idempotent-Replayed: true`. Use the date for a daily briefing
+  and retry freely.
+* `wait: true` answers like `/say` does, with 200 and `{ status, announcement }` once the rooms
+  are restored, or the error status when it failed.
+
+Otherwise the answer is `202 Accepted` with `Location: /announce/<id>` and
+`{ "id", "state": "queued", "priority", "requestId" }`. Then:
+
+    GET /announce/<id>            the record: state, target, rooms, timings, result or error
+    GET /announce?limit=20        the most recent records, newest first (`&state=done` to filter)
+    DELETE /announce/<id>         cancel: a queued one is dropped, a playing one is stopped and its
+                                  rooms restored (202; 409 once it is finished)
+    POST /tts  { "text" | "ssml", "voice"?, "engine"? }
+                                  synthesize ahead of time; answers { uri, durationMs, cached, synthMs, chunks }
+
+States: `queued → starting → playing → restoring → done`, with `interrupted` between two
+`playing`s when an urgent announcement cut in, and `failed` or `cancelled` instead of `done`.
+Every change is also published on `/events` and the webhook as an `announcement` event, so a
+client can subscribe instead of polling.
+
+Records live in `cache/announcements.sqlite` for `history.retentionDays` (90); set
+`history.enabled: false` (or `SONOS_HISTORY_ENABLED=false`) to keep them in memory only.
+
+When more than `announce.maxQueued` (10) announcements are waiting, or the server is shutting
+down, `POST /announce` answers 503 with a `Retry-After` header. Bodies over 64 KB get 413.
+
+`npm run smoke:announce` (with `SONOS_API` and `SONOS_ROOM`) queues a briefing on a running
+server, rings a doorbell into the middle of it and prints both records as they progress.
 
 Line-in
 -------
@@ -880,6 +945,23 @@ or
   }
 }
 ```
+
+Every announcement state change is posted too (see the announcement API for the states):
+
+```
+{
+  "type": "announcement",
+  "data": {
+    "id": "5f1c…", "state": "playing", "previousState": "starting",
+    "source": "api", "priority": "normal", "target": "preset:firstfloor",
+    "textPreview": "Good morning. Today is…", "requestId": "…", "idempotencyKey": "2026-09-07",
+    "at": 1789000000000, "rooms": ["1. Kitchen", "1. Dining Room"]
+  }
+}
+```
+
+The `done`, `cancelled` and `failed` events add `result` (the same object the announcement
+endpoints return) or `error`.
 
 "data" property will be equal to the same data as you would get from /RoomName/state or /zones. `npm run webhook-echo` starts a receiver on port 5007 that prints everything it is posted, so you can see the payloads while the API runs in another terminal.
 

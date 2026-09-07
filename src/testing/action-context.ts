@@ -14,9 +14,16 @@ import { FakeSystem } from './fake-system.ts';
 import { createTestPlayer } from './test-player.ts';
 import type { TestPlayer } from './test-player.ts';
 
-/** Records announcement specs instead of playing them; every handle resolves with `result`. */
+/**
+ * Records announcement specs instead of playing them. Every handle resolves with `result` (or
+ * rejects with `failure` when set), ids count up, and `find` knows the handles until cancelled.
+ */
 export class FakeAnnouncer implements AnnouncerLike {
   readonly calls: AnnouncementSpec[] = [];
+  readonly cancelled: string[] = [];
+  /** When set, every handle's `done` rejects with it. */
+  failure: Error | undefined;
+  readonly #handles = new Map<string, AnnouncementHandle>();
   result: AnnouncementResult = {
     id: 'fake-announcement',
     state: 'done',
@@ -32,7 +39,26 @@ export class FakeAnnouncer implements AnnouncerLike {
 
   submit(spec: AnnouncementSpec): AnnouncementHandle {
     this.calls.push(spec);
-    return { id: this.result.id, done: Promise.resolve(this.result), cancel: () => {} };
+    const id = `${this.result.id}-${this.calls.length}`;
+    const done =
+      this.failure === undefined
+        ? Promise.resolve({ ...this.result, id })
+        : Promise.reject(this.failure);
+    done.catch(() => undefined);
+    const handle: AnnouncementHandle = {
+      id,
+      done,
+      cancel: () => {
+        this.cancelled.push(id);
+        this.#handles.delete(id);
+      },
+    };
+    this.#handles.set(id, handle);
+    return handle;
+  }
+
+  find(id: string): AnnouncementHandle | undefined {
+    return this.#handles.get(id);
   }
 }
 

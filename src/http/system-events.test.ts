@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { describe, it, mock } from 'node:test';
+
+import type { AnnouncementTransition } from '../announce/types.ts';
 
 import { FakeSystem } from '../testing/fake-system.ts';
 import { createTestPlayer } from '../testing/test-player.ts';
@@ -73,8 +76,39 @@ describe('wireSystemEvents', () => {
     assert.equal(received.length, 4, 'nothing is forwarded after unwiring');
     assert.deepEqual(
       [...FORWARDED_EVENTS],
-      ['transport-state', 'topology-change', 'volume-change', 'mute-change'],
+      ['transport-state', 'topology-change', 'volume-change', 'mute-change', 'announcement'],
     );
+  });
+
+  it('forwards announcement transitions in the same envelope', () => {
+    const hub = new EventHub();
+    const received: string[] = [];
+    hub.add({ writeEvent: (data) => void received.push(data), writeComment: () => undefined });
+    const scheduler = new EventEmitter<{ transition: [AnnouncementTransition] }>();
+    const unwire = wireSystemEvents({
+      system: new FakeSystem(),
+      scheduler,
+      settings: { webhookType: 'kind', webhookData: 'payload' },
+      hub,
+    });
+    const transition: AnnouncementTransition = {
+      id: 'a1',
+      state: 'playing',
+      previousState: 'starting',
+      source: 'api',
+      priority: 'normal',
+      target: 'preset:firstfloor',
+      at: 1,
+      rooms: ['Kitchen'],
+    };
+
+    scheduler.emit('transition', transition);
+    assert.deepEqual(JSON.parse(received[0] ?? ''), { kind: 'announcement', payload: transition });
+
+    unwire();
+    scheduler.emit('transition', transition);
+    assert.equal(received.length, 1);
+    assert.equal(scheduler.listenerCount('transition'), 0);
   });
 
   it('works without a webhook', () => {

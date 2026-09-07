@@ -84,7 +84,10 @@ describe('say actions', () => {
       cached: undefined,
     });
     assert.deepEqual(spoken, [{ phrase: 'Dinner is ready', voice: 'Matthew' }]);
-    assert.deepEqual(result, { status: 'success', announcement: announcer.result });
+    assert.deepEqual(result, {
+      status: 'success',
+      announcement: { ...announcer.result, id: 'fake-announcement-1' },
+    });
   });
 
   it('sayall announces everywhere with the default volume', async () => {

@@ -18,6 +18,7 @@ import {
   expectVolumeRoundTrip,
   expectZonesShape,
 } from './contracts.ts';
+import { AnnouncementHistory } from '../history/sqlite.ts';
 import { FakeAnnouncer } from './action-context.ts';
 import { FakeSystem } from './fake-system.ts';
 import { LiveHarness } from './live-harness.ts';
@@ -40,6 +41,7 @@ function setup(roomNames = ['Kitchen', 'Den']) {
     tts: { providers: [], speak: () => Promise.reject(new Error('no tts')) },
     clips: { get: () => Promise.reject(new Error('no clips')) },
     announcer: new FakeAnnouncer(),
+    history: AnnouncementHistory.open(':memory:'),
     hub: new EventHub({ logger: silentLogger }),
     logger: silentLogger,
     version: 'test',

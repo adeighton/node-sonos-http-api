@@ -53,20 +53,20 @@ async function main(): Promise<void> {
     },
     { logger },
   );
-  const hub = new EventHub({ logger });
-  const unwire = wireSystemEvents({
-    system,
-    settings,
-    hub,
-    webhook: createWebhookNotifier({ settings, logger }),
-  });
-
   const scheduler = new AnnouncementScheduler({ system, logger, ...settings.announce });
   const history = AnnouncementHistory.open(
     settings.history.enabled ? join(settings.cacheDir, 'announcements.sqlite') : ':memory:',
     { logger, retentionDays: settings.history.retentionDays },
   );
   const unfollow = history.follow(scheduler);
+  const hub = new EventHub({ logger });
+  const unwire = wireSystemEvents({
+    system,
+    scheduler,
+    settings,
+    hub,
+    webhook: createWebhookNotifier({ settings, logger }),
+  });
   const app = createApp({
     system,
     settings,
@@ -80,6 +80,7 @@ async function main(): Promise<void> {
     tts: createTtsService(settings, { logger }),
     clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
     announcer: scheduler,
+    history,
     hub,
     logger,
     version: pkg.version,

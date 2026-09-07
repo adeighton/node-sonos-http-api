@@ -59,6 +59,14 @@ export class ServiceUnavailableError extends HttpError {
   }
 }
 
+/** The request is valid but the thing it refers to is in the wrong state for it. */
+export class ConflictError extends HttpError {
+  constructor(message: string, options?: HttpErrorOptions) {
+    super(409, message, options);
+    this.name = 'ConflictError';
+  }
+}
+
 /** The player or an upstream service did not answer in time. */
 export class GatewayTimeoutError extends HttpError {
   constructor(message: string, options?: HttpErrorOptions) {

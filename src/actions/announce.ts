@@ -1,6 +1,7 @@
 import type { AnnounceTarget, AnnouncementSpec, PreparedClip } from '../announce/types.ts';
 import type { Preset } from '../discovery/types.ts';
 import { NotFoundError } from '../http/errors.ts';
+import type { TtsRequest } from '../tts/provider.ts';
 import { parseInteger, requireValue } from './parse.ts';
 import type { Action, ActionContext, ActionRegistry } from './registry.ts';
 
@@ -53,11 +54,15 @@ export function textPreview(text: string): string {
   return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 }
 
-function speech(context: ActionContext, args: SayArguments): () => Promise<PreparedClip> {
+/** What preparing a clip needs; an ActionContext has it, and so do the JSON routes. */
+export type PrepareDeps = Pick<ActionContext, 'tts' | 'clips' | 'publicBaseUrl'>;
+
+/** A thunk that synthesizes the phrase when the announcement is submitted. */
+export function speech(deps: PrepareDeps, request: TtsRequest): () => Promise<PreparedClip> {
   return async () => {
-    const clip = await context.tts.speak({ phrase: args.phrase, voice: args.voice });
+    const clip = await deps.tts.speak(request);
     return {
-      uri: `${context.publicBaseUrl}${clip.uri}`,
+      uri: `${deps.publicBaseUrl}${clip.uri}`,
       durationMs: clip.durationMs,
       cached: clip.cached,
     };
@@ -65,12 +70,12 @@ function speech(context: ActionContext, args: SayArguments): () => Promise<Prepa
 }
 
 /** Looks the clip up now (a missing file is a 404 before any speaker is touched). */
-async function clipFile(
-  context: ActionContext,
+export async function clipFile(
+  deps: PrepareDeps,
   name: string | undefined,
 ): Promise<() => Promise<PreparedClip>> {
-  const clip = await context.clips.get(requireValue(name, 'clip file name'));
-  const prepared = { uri: `${context.publicBaseUrl}${clip.uri}`, durationMs: clip.durationMs };
+  const clip = await deps.clips.get(requireValue(name, 'clip file name'));
+  const prepared = { uri: `${deps.publicBaseUrl}${clip.uri}`, durationMs: clip.durationMs };
   return () => Promise.resolve(prepared);
 }
 
@@ -97,7 +102,11 @@ const say: Action = async (context, values) => {
     context,
     'say',
     { kind: 'player', player: context.player },
-    { prepare: speech(context, args), volume: args.volume, textPreview: textPreview(args.phrase) },
+    {
+      prepare: speech(context, { phrase: args.phrase, voice: args.voice }),
+      volume: args.volume,
+      textPreview: textPreview(args.phrase),
+    },
   );
 };
 
@@ -108,7 +117,11 @@ const sayAll: Action = async (context, values) => {
     context,
     'sayall',
     { kind: 'all' },
-    { prepare: speech(context, args), volume: args.volume, textPreview: textPreview(args.phrase) },
+    {
+      prepare: speech(context, { phrase: args.phrase, voice: args.voice }),
+      volume: args.volume,
+      textPreview: textPreview(args.phrase),
+    },
   );
 };
 
@@ -117,7 +130,7 @@ const sayPreset: Action = async (context, values) => {
   const target = requirePreset(context, values[0]);
   const args = parseSayArguments(values.slice(1), undefined);
   return announce(context, 'saypreset', target, {
-    prepare: speech(context, args),
+    prepare: speech(context, { phrase: args.phrase, voice: args.voice }),
     volume: args.volume,
     textPreview: textPreview(args.phrase),
   });

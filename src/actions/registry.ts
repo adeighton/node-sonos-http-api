@@ -12,6 +12,8 @@ import type { TtsService } from '../tts/index.ts';
 /** Queues an announcement and restores the rooms afterwards (see announce/scheduler.ts). */
 export interface AnnouncerLike {
   submit(spec: AnnouncementSpec): AnnouncementHandle;
+  /** A queued, playing or interrupted announcement, for cancelling. */
+  find(id: string): AnnouncementHandle | undefined;
 }
 
 /** What actions may use of the Sonos system (SonosSystem satisfies it; tests use a fake). */

@@ -15,6 +15,8 @@ import type { TestContext } from 'node:test';
 import pkg from '../../package.json' with { type: 'json' };
 import { createActionRegistry } from '../../src/actions/index.ts';
 import { AnnouncementScheduler } from '../../src/announce/scheduler.ts';
+import { AnnouncementHistory } from '../../src/history/sqlite.ts';
+import { wireSystemEvents } from '../../src/http/system-events.ts';
 import { createApp } from '../../src/app.ts';
 import { ensureRuntimeDirectories, loadSettings } from '../../src/config/load.ts';
 import { SonosSystem } from '../../src/discovery/sonos-system.ts';
@@ -95,6 +97,10 @@ export async function bootLive(): Promise<LiveStack | undefined> {
     { logger },
   );
   const hub = new EventHub({ logger });
+  const scheduler = new AnnouncementScheduler({ system, logger, ...settings.announce });
+  const history = AnnouncementHistory.open(':memory:', { logger });
+  const unfollow = history.follow(scheduler);
+  const unwire = wireSystemEvents({ system, scheduler, settings, hub });
   let port = 0;
   const app = createApp({
     system,
@@ -108,7 +114,8 @@ export async function bootLive(): Promise<LiveStack | undefined> {
     presets,
     tts: createTtsService(settings, { logger }),
     clips: createClipLibrary({ dir: join(settings.webroot, 'clips') }),
-    announcer: new AnnouncementScheduler({ system, logger, ...settings.announce }),
+    announcer: scheduler,
+    history,
     hub,
     logger,
     version: `${pkg.version}-live`,
@@ -127,6 +134,10 @@ export async function bootLive(): Promise<LiveStack | undefined> {
   });
 
   const close = async (): Promise<void> => {
+    await scheduler.drain(settings.announce.shutdownDrainMs);
+    unwire();
+    unfollow();
+    history.close();
     hub.close();
     presets.close();
     await server.close();

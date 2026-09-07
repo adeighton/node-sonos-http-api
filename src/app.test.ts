@@ -13,6 +13,7 @@ import type { Settings } from './config/schema.ts';
 import { EventHub } from './http/events.ts';
 import { PresetStore } from './presets/store.ts';
 import { captureLogs } from './testing/capture-logs.ts';
+import { AnnouncementHistory } from './history/sqlite.ts';
 import { FakeAnnouncer } from './testing/action-context.ts';
 import { FakeSystem } from './testing/fake-system.ts';
 import { createTestPlayer } from './testing/test-player.ts';
@@ -85,6 +86,7 @@ function testApp(webroot: string, options: TestAppOptions = {}) {
     tts: { providers: [], speak: () => Promise.reject(new Error('no tts in this test')) },
     clips: { get: () => Promise.reject(new Error('no clips in this test')) },
     announcer: new FakeAnnouncer(),
+    history: AnnouncementHistory.open(':memory:'),
     hub,
     logger,
     version: '2.0.0-test',

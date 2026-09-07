@@ -30,7 +30,8 @@
     "test:live": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --test --test-concurrency=1 --test-timeout=120000 'test/live/**/*.test.ts'",
     "check:live": "npm run check && npm run test:live",
     "smoke:discovery": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/discovery-smoke.ts",
-    "webhook-echo": "node --disable-warning=ExperimentalWarning scripts/webhook-echo.ts"
+    "webhook-echo": "node --disable-warning=ExperimentalWarning scripts/webhook-echo.ts",
+    "smoke:announce": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/announce-smoke.ts"
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.1127.0",

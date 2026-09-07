@@ -44,6 +44,8 @@ export const settingsSchema = z.object({
       shutdownDrainMs: z.coerce.number().int().min(0).default(15_000),
       /** How far an interrupted announcement rewinds before it carries on. */
       resumeRewindMs: z.coerce.number().int().min(0).default(1000),
+      /** How long a `POST /announce` idempotency key is remembered. */
+      idempotencyWindowMs: z.coerce.number().int().min(0).default(600_000),
     })
     .default({
       maxQueued: 10,
@@ -51,6 +53,7 @@ export const settingsSchema = z.object({
       restoreVerifyMs: 3000,
       shutdownDrainMs: 15_000,
       resumeRewindMs: 1000,
+      idempotencyWindowMs: 600_000,
     }),
   history: z
     .object({

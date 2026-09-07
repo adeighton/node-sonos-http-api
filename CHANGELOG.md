@@ -77,6 +77,25 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
   including the announcement it queued, carries the same id.
 - Generated speech is served with `Cache-Control: immutable`; clips are cacheable for an hour.
 
+### Announcement API, priority and history (September 2026)
+
+- `POST /announce` queues an announcement from JSON: `text`, `ssml` or `clip`; a target of
+  `"all"`, `{ "preset": name }`, or rooms (`["Kitchen", { "name": "Office", "volume": 20 }]`);
+  `volume`, `voice`, `engine`, `pauseOthers`, `priority` and an `idempotencyKey`. It answers
+  202 with the id and a `Location` at once, or 200 with the result when `wait` is true.
+  `GET /announce`, `GET /announce/:id` and `DELETE /announce/:id` list, read and cancel;
+  `POST /tts` synthesizes a clip ahead of time. See the README for the shapes.
+- Priority: an `urgent` announcement (a doorbell) goes ahead of the queue and interrupts a
+  playing `normal` one, which resumes from a second before it was paused once the urgent one is
+  done. Results carry `priority` and `interruptions`.
+- History: every announcement is recorded in `cache/announcements.sqlite` (state, target,
+  text preview, request id, result or error; 90 days by default), which is what `GET /announce`
+  reads and what makes an `idempotencyKey` a "do not play this twice" within
+  `announce.idempotencyWindowMs` (10 minutes).
+- `/events` and the webhook carry a new `announcement` event for every state change
+  (`queued`, `starting`, `playing`, `interrupted`, `restoring`, `done`, `failed`, `cancelled`).
+- `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
+
 ### Configuration
 
 - Secrets and ports can come from environment variables or a `.env` file (see `.env.example`);
@@ -84,8 +103,10 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
   object. `settings.json` is still read (JSON5) and unknown keys are reported at startup.
 - New `discoveryHosts` / `SONOS_DISCOVERY_HOSTS` for networks where SSDP multicast cannot
   reach the players.
-- New `announce` block (`maxQueued`, `topologyTimeoutMs`, `restoreVerifyMs`, `shutdownDrainMs`)
-  and `aws.maxConcurrency`, `aws.timeoutMs`, `aws.chunkTargetChars` for text-to-speech.
+- New `announce` block (`maxQueued`, `topologyTimeoutMs`, `restoreVerifyMs`, `shutdownDrainMs`,
+  `resumeRewindMs`, `idempotencyWindowMs`), `history` block (`enabled`, `retentionDays`;
+  `SONOS_HISTORY_ENABLED`) and `aws.maxConcurrency`, `aws.timeoutMs`, `aws.chunkTargetChars`
+  for text-to-speech.
 - `LOG_LEVEL` replaces `NODE_LOG_LEVEL`; `LOG_FORMAT=json` emits one JSON object per line.
 - `deploy.sh` requires Node 24 on the Pi, never copies `.env` (provision it once with `scp`)
   and runs the server with `node src/main.ts`.
