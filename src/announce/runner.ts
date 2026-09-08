@@ -1,4 +1,4 @@
-import { withTransientRetry } from '../discovery/retry.ts';
+import { playWhenReady, withTransientRetry } from '../discovery/retry.ts';
 import { errorMessage } from '../http/errors.ts';
 import type { Logger } from '../logger.ts';
 import { deferred } from '../util/deferred.ts';
@@ -63,6 +63,9 @@ export class AnnouncementRunner implements AnnouncementHandle {
   readonly #settled: Deferred<AnnouncementResult>;
   #interruptions = 0;
   #rooms: string[] | undefined;
+  /** Raised while playing (as opposed to while restoring); both end up in the result. */
+  readonly #warnings: string[] = [];
+  #clipError: unknown;
   /** Aborts the current wait for the end of the clip (cancel or interrupt). */
   #waiter: AbortController | undefined;
   #interruptRequested = false;
@@ -80,8 +83,11 @@ export class AnnouncementRunner implements AnnouncementHandle {
       this.#timings.prepareMs = Date.now() - this.#submittedAt;
       return clip;
     });
-    // Nobody may ever await the clip (cancelled while queued); the error surfaces in start().
-    this.#clip.catch(() => undefined);
+    // Nobody may ever await the clip (cancelled while queued), and a failure that lands before
+    // the speakers are touched saves us disturbing them at all; see #run.
+    this.#clip.catch((error: unknown) => {
+      this.#clipError = error;
+    });
   }
 
   /** Announces the initial `queued` state; the scheduler calls it once the runner is registered. */
@@ -149,6 +155,16 @@ export class AnnouncementRunner implements AnnouncementHandle {
 
     const rooms = plan.preset.players.map((player) => player.roomName);
     this.#rooms = rooms;
+
+    // Synthesis started when the announcement was submitted and overlaps the regrouping, but an
+    // outright rejection (an unknown voice, a missing file) settles within a microtask or two.
+    // One turn of the loop is enough to catch those, and then nothing is grouped to restore.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (this.#clipError !== undefined) {
+      this.#fail(this.#clipError, rooms);
+      return;
+    }
+
     let clip: PreparedClip | undefined;
     let failure: unknown;
     try {
@@ -180,9 +196,17 @@ export class AnnouncementRunner implements AnnouncementHandle {
     await this.#formGroup(plan);
     const clip = await this.#clip;
     this.#checkCancelled();
-    await plan.coordinator.setAVTransport(clip.uri);
+    await this.#setClip(plan, clip.uri);
     this.#checkCancelled();
     return clip;
+  }
+
+  /** A player that has just been regrouped can answer a transport change late; one retry covers it. */
+  #setClip(plan: AnnouncementPlan, uri: string): Promise<unknown> {
+    return withTransientRetry(() => plan.coordinator.setAVTransport(uri), {
+      label: 'SetAVTransportURI',
+      logger: this.#logger,
+    });
   }
 
   async #formGroup(plan: AnnouncementPlan): Promise<void> {
@@ -256,9 +280,17 @@ export class AnnouncementRunner implements AnnouncementHandle {
     }
 
     try {
-      await plan.coordinator.play();
+      // Not a bare play(): a player asked to play right after a transport change answers 701
+      // until it has switched, exactly as it does for the radio actions.
+      await playWhenReady(plan.coordinator, this.#logger);
       const outcome = await ended;
       if (outcome !== 'aborted') {
+        if (outcome === 'timeout') {
+          // The clip may never have been fetched. Say so: the rooms are put back either way, but
+          // "done" should not mean "we assumed it played".
+          this.#warn('the clip was not heard playing; the rooms may have been silent');
+        }
+
         return { outcome: 'ended', elapsedMs: Date.now() - playedAt };
       }
 
@@ -319,12 +351,18 @@ export class AnnouncementRunner implements AnnouncementHandle {
     }
 
     if (plan.coordinator.avTransportUri !== clip.uri) {
-      await plan.coordinator.setAVTransport(clip.uri);
+      await this.#setClip(plan, clip.uri);
     }
 
     this.#checkCancelled();
     await plan.coordinator.timeSeek(Math.floor(offsetMs / 1000));
     this.#logger.info({ offsetMs }, 'resuming the interrupted announcement');
+  }
+
+  /** Records something the caller should know about an otherwise successful announcement. */
+  #warn(message: string): void {
+    this.#warnings.push(message);
+    this.#logger.warn(message);
   }
 
   #checkCancelled(): void {
@@ -363,7 +401,7 @@ export class AnnouncementRunner implements AnnouncementHandle {
       interruptions: this.#interruptions,
       clip,
       restore: outcome.restore,
-      warnings: outcome.warnings,
+      warnings: [...this.#warnings, ...outcome.warnings],
       timings: this.#timings,
     };
     this.#transition(state, { result });

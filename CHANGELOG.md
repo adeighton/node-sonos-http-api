@@ -101,6 +101,14 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
 - `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
   facts once the players are known; 503 while starting or shutting down.
+- Fixed: an announcement whose clip was never heard playing (the player could not fetch it, or
+  its events went missing) reported a clean `done`. The result now carries a warning saying the
+  rooms may have been silent, so `done` means observed, not assumed.
+- Fixed: the announcement's `SetAVTransportURI` and `Play` are retried the way the radio actions
+  already retried theirs — a player asked to play right after a transport change refuses with
+  UPnP 701 until it has switched, and one busy regrouping can answer late.
+- Fixed: an announcement whose clip cannot be prepared (an unknown voice, a missing file) no
+  longer groups the rooms and restores them for nothing; it fails before any speaker is touched.
 - Fixed: the first announcement after a long quiet spell could fail with
   `Polly failed: Session closed with error code 1`. The Polly client speaks HTTP/2 and pools one
   session per region with no idle timeout, so a server that synthesizes once a day reached for a

@@ -38,12 +38,19 @@ export function isNotReadyFault(error: unknown): boolean {
   return error instanceof SoapFaultError && error.errorCode === 701;
 }
 
-/** Plays, retrying once after a second when the player answers 701 because it is still switching. */
-export function playWhenReady(player: { play(): Promise<void> }, logger?: Logger): Promise<void> {
+/**
+ * Plays, retrying once after a second when the player is still switching source: it either
+ * refuses with 701 or, while it is busy, answers late or with a bare 500. Play is idempotent,
+ * so a second one costs nothing if the first landed after all.
+ */
+export function playWhenReady(
+  player: { play(): Promise<unknown> },
+  logger?: Logger,
+): Promise<unknown> {
   return withTransientRetry(() => player.play(), {
     label: 'Play',
     backoffMs: 1000,
-    retryOn: isNotReadyFault,
+    retryOn: (error) => isNotReadyFault(error) || isTransientFault(error),
     logger,
   });
 }

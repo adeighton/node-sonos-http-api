@@ -121,7 +121,11 @@ describe('AnnouncementScheduler', () => {
 
     await assert.rejects(failing.done, /polly down/);
     assert.equal((await next.done).state, 'done');
-    assert.deepEqual(order, ['play:Kitchen', 'restore:Kitchen', 'play:Office', 'restore:Office']);
+    assert.deepEqual(
+      order,
+      ['play:Office', 'restore:Office'],
+      'the doomed one never reached the speakers, so Kitchen was neither grouped nor restored',
+    );
   });
 
   it('skips a queued announcement that was cancelled', async () => {

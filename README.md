@@ -612,8 +612,11 @@ for the answer now does:
    A 503 carries `Retry-After`; wait that long and post again with the same key (it will never
    play twice).
 2. Either poll `GET /announce/<id>` until `state` is `done`, `failed` or `cancelled`, or
-   subscribe to `/events` and watch for `announcement` events with that id. The record's
-   `result.restore` says whether every room was put back; `result.warnings` says which was not.
+   subscribe to `/events` and watch for `announcement` events with that id. `result.restore` says
+   whether every room was put back, and `result.warnings` is the list of things that went less
+   than perfectly — a room that could not be restored, or a clip the players never reported
+   playing. **`done` with a non-empty `warnings` is worth logging**: the announcement finished,
+   but something about it was not what it should have been.
 3. Optionally `POST /tts` with the same text a minute early, so the clip is on disk when the
    announcement is due (`timings.prepareMs` then shows a few milliseconds).
 4. Build any voice picker from `GET /voices` rather than a free-text field, so a voice that does

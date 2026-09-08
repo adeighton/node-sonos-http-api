@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 
 import type { Preset } from '../discovery/types.ts';
+import { RequestTimeoutError, SoapFaultError } from '../discovery/errors.ts';
 import { BadRequestError } from '../http/errors.ts';
 import { flushPromises } from '../testing/async.ts';
 import { captureLogs } from '../testing/capture-logs.ts';
@@ -124,7 +125,11 @@ describe('AnnouncementRunner', () => {
     assert.equal(transitions.at(-1)?.result, result, 'the final transition carries the result');
     assert.deepEqual(result.clip, CLIP);
     assert.equal(result.restore, 'ok');
-    assert.deepEqual(result.warnings, []);
+    assert.deepEqual(
+      result.warnings,
+      ['the clip was not heard playing; the rooms may have been silent'],
+      'the player never reported playing, so done does not claim it was heard',
+    );
     const { timings } = result;
     assert.equal(timings.queuedMs, 0);
     assert.equal(timings.playMs, 4000, 'no STOPPED arrived: the clip length plus the margin');
@@ -146,6 +151,7 @@ describe('AnnouncementRunner', () => {
 
     assert.equal(system.appliedPresets.length, 2);
     assert.equal(result.timings.playMs, 0);
+    assert.deepEqual(result.warnings, [], 'the clip was heard from start to finish');
     assert.equal(kitchen.player.listenerCount('playback-state'), 0, 'listeners are removed');
   });
 
@@ -211,6 +217,46 @@ describe('AnnouncementRunner', () => {
     assert.ok(messages().includes('players did not regroup in time, playing anyway'));
     assert.equal(soapActions(kitchen.soap.calls).filter((a) => a === 'Play').length, 1);
     assert.equal(result.timings.topologyMs, 1000);
+  });
+
+  it('never touches the speakers when the clip fails before the group is formed', async () => {
+    const { system, kitchen, runner, states } = await setup();
+    kitchen.soap.calls.length = 0;
+
+    const pending = runner({
+      target: { kind: 'player', player: kitchen.player },
+      prepare: () => Promise.reject(new BadRequestError("Unknown Polly voice 'Gandalf'")),
+    }).start();
+
+    await assert.rejects(settle(pending), /Gandalf/);
+    assert.equal(system.appliedPresets.length, 0, 'nothing was grouped');
+    assert.equal(kitchen.soap.calls.length, 0, 'and nothing was asked of the player');
+    assert.deepEqual(states, ['starting', 'failed'], 'nothing to restore either');
+  });
+
+  it('retries the transport change and the play while the player is still switching', async () => {
+    const { kitchen, runner, messages } = await setup();
+    kitchen.soap.calls.length = 0;
+    // In call order: the transport change times out, its retry lands, Play is refused because the
+    // player is still switching, its retry lands.
+    kitchen.soap.queueFailure(new RequestTimeoutError('http://player/AVTransport', 10));
+    kitchen.soap.queueResponse(Readable.from([]));
+    kitchen.soap.queueFailure(
+      new SoapFaultError('http://player/AVTransport', 'Play', 701, 'transition not available', ''),
+    );
+
+    const result = await settle(
+      runner({ target: { kind: 'player', player: kitchen.player } }).start(),
+    );
+
+    assert.deepEqual(soapActions(kitchen.soap.calls), [
+      'SetAVTransportURI',
+      'SetAVTransportURI',
+      'Play',
+      'Play',
+    ]);
+    assert.equal(result.state, 'done');
+    assert.equal(messages().filter((m) => m === 'command failed, retrying').length, 2);
   });
 
   it('fails with the clip error but still restores when the clip cannot be prepared', async () => {
