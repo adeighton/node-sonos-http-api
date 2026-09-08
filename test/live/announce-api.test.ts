@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 import type { AnnouncementResult, AnnouncementState } from '../../src/announce/types.ts';
 import type { HistoryEntry } from '../../src/history/sqlite.ts';
-import type { LiveHarness } from '../../src/testing/live-harness.ts';
+import { LiveHarness } from '../../src/testing/live-harness.ts';
 import { describeLive } from './boot.ts';
 
 const CLIP = 'TacoBellBong.mp3';
@@ -61,6 +61,51 @@ async function waitFor(
 }
 
 const finished = (entry: HistoryEntry) => TERMINAL.has(entry.state);
+
+/** Subscribes to `/events` and collects the announcement transitions until closed. */
+async function announcementEvents(baseUrl: string) {
+  const controller = new AbortController();
+  const events: Array<{ type: string; data: { id: string; state: string } }> = [];
+  const stream = await fetch(new URL('/events', baseUrl), { signal: controller.signal });
+  assert.equal(stream.status, 200);
+  const reading = (async () => {
+    const reader = stream.body?.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (reader) {
+      const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) {
+        const data = frame
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+          .join('');
+        if (data) {
+          events.push(JSON.parse(data) as (typeof events)[number]);
+        }
+      }
+    }
+  })();
+
+  return {
+    /** The states one announcement passed through, in order. */
+    statesOf: (id: string) =>
+      events
+        .filter((event) => event.type === 'announcement' && event.data.id === id)
+        .map((event) => event.data.state),
+    close: async () => {
+      controller.abort();
+      await reading;
+    },
+  };
+}
 
 describeLive('announcement API (live)', ({ it }) => {
   it('queues a clip with 202, reports it through GET /announce/:id and lists it', async ({
@@ -216,36 +261,7 @@ describeLive('announcement API (live)', ({ it }) => {
 
   it('streams the lifecycle over /events', async ({ harness, baseUrl }) => {
     const room = harness.rooms[0] ?? '';
-    const controller = new AbortController();
-    const events: Array<{ type: string; data: { id: string; state: string } }> = [];
-    const stream = await fetch(new URL('/events', baseUrl), { signal: controller.signal });
-    assert.equal(stream.status, 200);
-    const reading = (async () => {
-      const reader = stream.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (reader) {
-        const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split('\n\n');
-        buffer = frames.pop() ?? '';
-        for (const frame of frames) {
-          const data = frame
-            .split('\n')
-            .filter((line) => line.startsWith('data:'))
-            .map((line) => line.slice(5).trim())
-            .join('');
-          if (data) {
-            events.push(JSON.parse(data) as (typeof events)[number]);
-          }
-        }
-      }
-    })();
-
+    const events = await announcementEvents(baseUrl);
     try {
       await harness.withRestore(async () => {
         const played = await post(harness, '/announce', {
@@ -257,14 +273,56 @@ describeLive('announcement API (live)', ({ it }) => {
         assert.equal(played.status, 200, JSON.stringify(played.body));
         const { id } = (played.body as { announcement: { id: string } }).announcement;
         await sleep(500);
-        const states = events
-          .filter((event) => event.type === 'announcement' && event.data.id === id)
-          .map((event) => event.data.state);
-        assert.deepEqual(states, ['queued', 'starting', 'playing', 'restoring', 'done']);
+        assert.deepEqual(events.statesOf(id), [
+          'queued',
+          'starting',
+          'playing',
+          'restoring',
+          'done',
+        ]);
       });
     } finally {
-      controller.abort();
-      await reading;
+      await events.close();
+    }
+  });
+
+  it('an announcement with an unknown voice fails without touching a single room', async ({
+    harness,
+    baseUrl,
+  }, t) => {
+    if (!ttsConfigured()) {
+      t.skip('AWS credentials are not configured');
+      return;
+    }
+
+    const room = harness.rooms[0] ?? '';
+    const events = await announcementEvents(baseUrl);
+    try {
+      // Compared in full, transport and playback state included: this room should be untouched,
+      // not restored, so there is nothing to forgive.
+      const before = await harness.snapshot([room]);
+
+      const doomed = await post(harness, '/announce', {
+        text: 'This should never be heard.',
+        target: [room],
+        volume: VOLUME,
+        voice: 'Gandalf',
+      });
+      assert.equal(doomed.status, 202, JSON.stringify(doomed.body));
+      const { id } = doomed.body as { id: string };
+
+      const entry = await waitFor(harness, id, finished, 30_000);
+      assert.equal(entry.state, 'failed', JSON.stringify(entry));
+      assert.match(entry.error ?? '', /Unknown Polly voice 'Gandalf'/);
+      await sleep(500);
+      assert.deepEqual(
+        events.statesOf(id),
+        ['queued', 'starting', 'failed'],
+        'no restoring: nothing was grouped, so nothing had to be put back',
+      );
+      assert.deepEqual(LiveHarness.differences(before, await harness.snapshot([room])), []);
+    } finally {
+      await events.close();
     }
   });
 
