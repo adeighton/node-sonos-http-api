@@ -170,7 +170,7 @@ Errors answer `{"status":"error","error":"<message>"}` with a meaningful status 
 | 413    | A `POST` body over 64 KB                                        |
 | 500    | A bug in this server (please report it with the log line)       |
 | 502    | The player (or a music service) refused the command; the message carries the UPnP error code and its meaning, e.g. `Seek was rejected by the player: UPnP error 711 (Illegal seek target: no such track or position)` |
-| 503    | No Sonos system has been discovered yet, TTS is not configured, too many announcements are waiting (`Retry-After`), or the server is shutting down |
+| 503    | No Sonos system has been discovered yet, TTS is not configured or unreachable (`Retry-After`), too many announcements are waiting (`Retry-After`), or the server is shutting down |
 | 504    | The player did not answer in time                                |
 
 Multi-line phrases

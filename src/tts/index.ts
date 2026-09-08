@@ -74,7 +74,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
           timeoutMs: settings.aws.timeoutMs,
           chunkTargetChars: settings.aws.chunkTargetChars,
         },
-        { cache, client, catalog },
+        { cache, client, catalog, logger },
       ),
     );
   }

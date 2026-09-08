@@ -7,12 +7,14 @@ import { DescribeVoicesCommand } from '@aws-sdk/client-polly';
 import type { SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 
 import { BadGatewayError, BadRequestError, HttpError } from '../http/errors.ts';
+import { captureLogs } from '../testing/capture-logs.ts';
 import { fixturePath } from '../testing/fixtures.ts';
 import { withTempDir } from '../testing/with-temp-dir.ts';
 import { ClipCache } from './cache.ts';
 import { DurationIndex } from './duration-index.ts';
 import { concatMp3, parseMp3 } from './mp3.ts';
 import {
+  connectionErrorCode,
   createPollyProvider,
   parseVoiceId,
   pollyClipName,
@@ -27,6 +29,19 @@ interface FakeOptions {
   delayMs?: number;
   voices?: Array<{ Id: string; SupportedEngines: string[] }>;
   fail?: (command: SynthesizeSpeechCommand) => Error | undefined;
+}
+
+/** Node's error for an HTTP/2 session that was dropped while it sat in the SDK's pool. */
+function sessionClosed(): Error {
+  return Object.assign(new Error('Session closed with error code 1'), {
+    code: 'ERR_HTTP2_SESSION_ERROR',
+  });
+}
+
+/** Fails the first `times` synthesis attempts with `error`, then succeeds. */
+function failFirst(times: number, error: Error) {
+  let left = times;
+  return () => (left-- > 0 ? error : undefined);
 }
 
 /** A Polly stand-in answering every synthesis with the fixture MP3 and recording the inputs. */
@@ -236,6 +251,45 @@ describe('polly provider', () => {
     });
   });
 
+  it('retries once when the pooled connection to Polly has been dropped', async () => {
+    await withTempDir(async (dir) => {
+      const logs = captureLogs();
+      const polly = await fakePolly({ fail: failFirst(1, sessionClosed()) });
+      const provider = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: polly.client, logger: logs.logger },
+      );
+
+      const clip = await provider.synthesize({ phrase: 'Dinner is ready' });
+
+      assert.equal(clip.chunks, 1);
+      assert.equal(polly.inputs.length, 2, 'the first attempt died, the second dialled again');
+      assert.ok(logs.messages().includes('command failed, retrying'));
+    });
+  });
+
+  it('gives up on a second connection failure, and never retries what Polly refused', async () => {
+    await withTempDir(async (dir) => {
+      const dropped = await fakePolly({ fail: failFirst(2, sessionClosed()) });
+      const failing = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: dropped.client },
+      );
+      await assert.rejects(failing.synthesize({ phrase: 'Dinner is ready' }), /Session closed/);
+      assert.equal(dropped.inputs.length, 2, 'one retry, not a loop');
+
+      const refused = await fakePolly({
+        fail: () => Object.assign(new Error('too long'), { name: 'TextLengthExceededException' }),
+      });
+      const rejecting = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: refused.client },
+      );
+      await assert.rejects(rejecting.synthesize({ phrase: 'Dinner is ready' }), /too long/);
+      assert.equal(refused.inputs.length, 1, 'a refusal is an answer, not a broken connection');
+    });
+  });
+
   it('fails loudly (and leaves no file) when Polly answers without audio', async () => {
     await withTempDir(async (dir) => {
       const client: PollyClientLike = { send: () => Promise.resolve({}) };
@@ -289,6 +343,30 @@ describe('toHttpError', () => {
     const original = new BadRequestError('mine');
     assert.equal(toHttpError(original), original);
     assert.ok(toHttpError(new Error('x')) instanceof HttpError);
+  });
+});
+
+describe('connection failures', () => {
+  it('are a 503 with Retry-After, named by their code, however deeply they are wrapped', () => {
+    const session = toHttpError(sessionClosed());
+    assert.equal(session.status, 503);
+    assert.equal(
+      session.message,
+      'Could not reach Polly (ERR_HTTP2_SESSION_ERROR); try again shortly',
+    );
+    assert.deepEqual(session.headers, { 'Retry-After': '2' });
+
+    const reset = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    assert.equal(toHttpError(new Error('wrapped', { cause: reset })).status, 503);
+    assert.equal(connectionErrorCode(new Error('wrapped', { cause: reset })), 'ECONNRESET');
+    assert.equal(connectionErrorCode(new Error('plain')), undefined);
+    assert.equal(connectionErrorCode('not an error'), undefined);
+    // A request that timed out is still a 504: the connection was fine, Polly was slow.
+    const timeout = Object.assign(new Error('timed out'), {
+      name: 'TimeoutError',
+      code: 'ETIMEDOUT',
+    });
+    assert.equal(toHttpError(timeout).status, 504);
   });
 });
 

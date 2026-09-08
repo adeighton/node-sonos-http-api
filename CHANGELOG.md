@@ -101,6 +101,15 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
 - `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
   facts once the players are known; 503 while starting or shutting down.
+- Fixed: the first announcement after a long quiet spell could fail with
+  `Polly failed: Session closed with error code 1`. The Polly client speaks HTTP/2 and pools one
+  session per region with no idle timeout, so a server that synthesizes once a day reached for a
+  session that had been idle since yesterday and had long since been dropped; the AWS SDK does
+  not class `ERR_HTTP2_SESSION_ERROR` as retryable, so the announcement failed outright. Idle
+  sessions are now closed after 60 s (`aws.sessionTimeoutMs`), a dropped connection is retried
+  once, and connection failures answer 503 with `Retry-After` and name their cause
+  (`Could not reach Polly (ERR_HTTP2_SESSION_ERROR); try again shortly`) instead of a 502 that
+  read as Polly's fault.
 - `GET /voices` serves the Polly voice catalog (id, gender, language, supported engines) from the
   same day-long cache the server validates against, so a client can offer a dropdown instead of a
   free-text voice name; 200 with an empty list when Polly is not configured or unreachable.

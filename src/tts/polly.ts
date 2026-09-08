@@ -11,6 +11,7 @@ import type { PollyClientConfig } from '@aws-sdk/client-polly';
 
 import { POLLY_ENGINES } from '../config/schema.ts';
 import type { PollyEngine } from '../config/schema.ts';
+import { withTransientRetry } from '../discovery/retry.ts';
 import {
   BadGatewayError,
   BadRequestError,
@@ -18,6 +19,8 @@ import {
   HttpError,
   ServiceUnavailableError,
 } from '../http/errors.ts';
+import { silentLogger } from '../logger.ts';
+import type { Logger } from '../logger.ts';
 import { createLimiter } from '../util/parallel.ts';
 import type { ClipCache } from './cache.ts';
 import { chunkSpeech } from './chunk.ts';
@@ -60,6 +63,8 @@ export interface PollyClientOptions {
   credentials?: { accessKeyId: string; secretAccessKey: string } | undefined;
   /** Per-attempt request timeout in the SDK; default 15 s. */
   requestTimeoutMs?: number;
+  /** How long an idle HTTP/2 session to Polly is kept; default 60 s. See createPollyClient. */
+  sessionTimeoutMs?: number;
 }
 
 export interface PollyProviderOptions {
@@ -78,6 +83,7 @@ export interface PollyProviderDeps {
   client: PollyClientLike;
   /** Validates voice/engine pairs before synthesizing; optional. */
   catalog?: VoiceCatalog;
+  logger?: Logger;
 }
 
 export const DEFAULT_POLLY_VOICE = 'Joanna';
@@ -131,13 +137,25 @@ export function pollyClipName(phrase: string, voice: string, engine: PollyEngine
   return `polly-${hash}-${voice}-${engine}.mp3`;
 }
 
-/** One PollyClient per process, with retries and a per-attempt timeout. */
+/**
+ * One PollyClient per process, with retries and a per-attempt timeout.
+ *
+ * `sessionTimeout` matters more than it looks: the Polly client speaks HTTP/2 and pools one
+ * session per region, and without an idle timeout that session is kept and reused for the life
+ * of the process. A server that synthesizes once a day then reaches for a session that has been
+ * idle since yesterday, which AWS or any NAT in between has long since dropped, and Node reports
+ * `ERR_HTTP2_SESSION_ERROR: Session closed with error code 1` — which the SDK does not count as
+ * retryable. Closing idle sessions instead costs one handshake per announcement.
+ */
 export function createPollyClient(options: PollyClientOptions = {}): PollyClientLike {
   const config: PollyClientConfig = {
     region: options.region ?? DEFAULT_POLLY_REGION,
     maxAttempts: 3,
     retryMode: 'adaptive',
-    requestHandler: { requestTimeout: options.requestTimeoutMs ?? 15_000 },
+    requestHandler: {
+      requestTimeout: options.requestTimeoutMs ?? 15_000,
+      sessionTimeout: options.sessionTimeoutMs ?? 60_000,
+    },
   };
   if (options.credentials) {
     config.credentials = options.credentials;
@@ -160,7 +178,44 @@ function sampleRateFor(engine: PollyEngine): string {
 interface ErrorLike {
   name?: string;
   message?: string;
+  code?: string;
   $metadata?: { httpStatusCode?: number };
+}
+
+/**
+ * Failures of the connection to Polly rather than of the request: the pooled HTTP/2 session was
+ * dropped, or the network is not there. Worth one retry, since the failed attempt takes the dead
+ * session out of the pool and the next one dials again.
+ */
+const CONNECTION_ERROR_CODES = new Set([
+  'ERR_HTTP2_SESSION_ERROR',
+  'ERR_HTTP2_STREAM_ERROR',
+  'ERR_HTTP2_GOAWAY_SESSION',
+  'ERR_HTTP2_INVALID_SESSION',
+  'ERR_HTTP2_STREAM_CANCEL',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+]);
+
+/** The connection-level code behind a failure, following the chain of causes the SDK wraps. */
+export function connectionErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    const { code } = current as ErrorLike;
+    if (code !== undefined && CONNECTION_ERROR_CODES.has(code)) {
+      return code;
+    }
+
+    current = current.cause;
+  }
+
+  return undefined;
 }
 
 const THROTTLED = new Set([
@@ -218,6 +273,14 @@ export function toHttpError(error: unknown): HttpError {
     return new GatewayTimeoutError('Polly did not answer in time', { cause: error });
   }
 
+  const connectionCode = connectionErrorCode(error);
+  if (connectionCode !== undefined) {
+    return new ServiceUnavailableError(
+      `Could not reach Polly (${connectionCode}); try again shortly`,
+      { cause: error, headers: { 'Retry-After': '2' } },
+    );
+  }
+
   return new BadGatewayError(`Polly failed: ${message}`, { cause: error });
 }
 
@@ -231,6 +294,7 @@ export function createPollyProvider(
 ): TtsProvider {
   const limit = createLimiter(options.maxConcurrency ?? DEFAULT_CONCURRENCY);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const logger = deps.logger ?? silentLogger;
 
   /**
    * The voice to synthesize with. The live catalog decides when there is one: it is what
@@ -274,16 +338,26 @@ export function createPollyProvider(
   ): Promise<Uint8Array> {
     const deadline = AbortSignal.timeout(timeoutMs);
     const abortSignal = signal ? AbortSignal.any([deadline, signal]) : deadline;
-    const response = await deps.client.send(
-      new SynthesizeSpeechCommand({
-        OutputFormat: 'mp3',
-        SampleRate: sampleRateFor(engine),
-        VoiceId: voice,
-        Engine: engine,
-        TextType: 'ssml',
-        Text: text,
-      }),
-      { abortSignal },
+    // A dropped connection is worth one retry: the failed attempt evicts the dead HTTP/2 session
+    // from the pool, so the second one dials again. Everything else is Polly's answer, not noise.
+    const response = await withTransientRetry(
+      () =>
+        deps.client.send(
+          new SynthesizeSpeechCommand({
+            OutputFormat: 'mp3',
+            SampleRate: sampleRateFor(engine),
+            VoiceId: voice,
+            Engine: engine,
+            TextType: 'ssml',
+            Text: text,
+          }),
+          { abortSignal },
+        ),
+      {
+        label: 'SynthesizeSpeech',
+        retryOn: (error) => connectionErrorCode(error) !== undefined,
+        logger,
+      },
     );
     if (!response.AudioStream) {
       throw new BadGatewayError('Polly answered without audio');
