@@ -18,12 +18,13 @@ import {
   ttsBodySchema,
 } from './announce-schema.ts';
 import type { AnnounceBody } from './announce-schema.ts';
+import { notReadyError } from './dispatch.ts';
 import { ConflictError, NotFoundError } from './errors.ts';
 
 export type HistoryLike = Pick<AnnouncementHistory, 'get' | 'list' | 'findByIdempotencyKey'>;
 
 export interface AnnounceRouteDeps extends Omit<PrepareDeps, 'publicBaseUrl'> {
-  system: Pick<ActionSystem, 'getPlayer'>;
+  system: Pick<ActionSystem, 'getPlayer' | 'zones'>;
   presets: Pick<PresetStore, 'get'>;
   announcer: AnnouncerLike;
   history: HistoryLike;
@@ -41,6 +42,12 @@ const MAX_BODY_BYTES = 64 * 1024;
 const TERMINAL = new Set(['done', 'failed', 'cancelled']);
 
 function resolveTarget(deps: AnnounceRouteDeps, body: AnnounceBody): AnnounceTarget {
+  if (deps.system.zones.length === 0) {
+    // Without this the rooms of a perfectly good preset look like typos, and the caller is told
+    // its request was bad (400, do not retry) when the truth is that we are not ready (503).
+    throw notReadyError();
+  }
+
   const { target } = body;
   if (target === 'all') {
     return { kind: 'all' };

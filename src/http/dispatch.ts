@@ -2,6 +2,11 @@ import type { ActionContext, ActionRegistry, ActionSystem } from '../actions/reg
 import type { Player } from '../discovery/player.ts';
 import { BadRequestError, NotFoundError, ServiceUnavailableError } from './errors.ts';
 
+/** Discovery is still looking, or has lost the system; the caller should come back shortly. */
+export function notReadyError(): ServiceUnavailableError {
+  return new ServiceUnavailableError(NO_SYSTEM_MESSAGE, { headers: { 'Retry-After': '5' } });
+}
+
 export const NO_SYSTEM_MESSAGE =
   'No Sonos system has been discovered yet. If this does not resolve itself within a few seconds, ' +
   'check that this server and the players share a network, or set discoveryHosts.';
@@ -40,7 +45,7 @@ export interface ResolvedRequest {
  */
 export function resolveRequest(system: ActionSystem, segments: string[]): ResolvedRequest {
   if (system.zones.length === 0) {
-    throw new ServiceUnavailableError(NO_SYSTEM_MESSAGE);
+    throw notReadyError();
   }
 
   const first = segments[0] ?? '';
@@ -51,7 +56,7 @@ export function resolveRequest(system: ActionSystem, segments: string[]): Resolv
 
   const anyPlayer = system.getAnyPlayer();
   if (!anyPlayer) {
-    throw new ServiceUnavailableError(NO_SYSTEM_MESSAGE);
+    throw notReadyError();
   }
 
   return { player: anyPlayer, action: first.toLowerCase(), values: segments.slice(1) };

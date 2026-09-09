@@ -141,6 +141,22 @@ describe('POST /announce', () => {
     });
   });
 
+  it('is refused with a retryable 503 before any player is known', async () => {
+    const { app, post, announcer, system } = await setup();
+    system.zones.length = 0;
+
+    const response = await post('/announce', { clip: 'ding.mp3', target: { preset: 'doorbell' } });
+
+    assert.equal(response.status, 503, 'not 400: the request is fine, we are not ready');
+    assert.equal(response.headers.get('Retry-After'), '5');
+    const body = (await response.json()) as { error: string };
+    assert.match(body.error, /No Sonos system has been discovered yet/);
+    assert.equal(announcer.calls.length, 0, 'nothing was queued to fail later');
+    // The history and the catalog do not depend on the players, so they still answer.
+    assert.equal((await app.request('/announce')).status, 200);
+    assert.equal((await app.request('/voices')).status, 200);
+  });
+
   it('rejects bad bodies with 400 and too large ones with 413', async () => {
     const { post, app } = await setup();
     assert.equal((await post('/announce', { target: 'all' })).status, 400);
