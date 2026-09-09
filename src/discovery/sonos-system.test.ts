@@ -59,14 +59,20 @@ function streamResponse(): HttpStreamResponse {
 }
 
 function setup(
-  options: { household?: string; httpFails?: boolean; discoveryHosts?: string[] } = {},
+  options: {
+    household?: string;
+    httpFails?: boolean;
+    discoveryHosts?: string[];
+    /** Hosts whose device description never answers, as if the player were unplugged. */
+    unreachable?: string[];
+  } = {},
 ) {
   const ssdp = new FakeSsdp();
   const listeners: FakeListener[] = [];
   const subscribers: FakeSubscriber[] = [];
   const soap = fakeSoapClient();
-  const http = mock.fn((_options: HttpRequestOptions): Promise<HttpStreamResponse> =>
-    options.httpFails
+  const http = mock.fn((request: HttpRequestOptions): Promise<HttpStreamResponse> =>
+    options.httpFails || (options.unreachable ?? []).some((host) => request.url.includes(host))
       ? Promise.reject(new Error('unreachable'))
       : Promise.resolve(streamResponse()),
   );
@@ -129,6 +135,9 @@ function setup(
     },
   };
 }
+
+/** Matches SEED_RETRY_MS in sonos-system.ts. */
+const SEED_RETRY_MS = 5000;
 
 describe('SonosSystem', () => {
   it('starts scanning once', () => {
@@ -536,6 +545,35 @@ describe('SonosSystem', () => {
       );
       assert.equal(subscribers[0]?.url, 'http://192.168.2.230:1400/ZoneGroupTopology/Event');
       assert.equal(ssdp.stop.mock.callCount(), 1);
+    });
+
+    it('moves on to the next host when the first one does not answer', async () => {
+      mock.timers.enable({ apis: ['setTimeout'] });
+      try {
+        const { system, http, subscribers } = setup({
+          discoveryHosts: ['192.168.2.230', '192.168.2.231'],
+          unreachable: ['192.168.2.230'],
+        });
+
+        system.start();
+        mock.timers.tick(0);
+        await flushPromises();
+        assert.equal(http.mock.callCount(), 1);
+        assert.match(http.mock.calls[0]?.arguments[0].url ?? '', /192\.168\.2\.230/);
+
+        mock.timers.tick(SEED_RETRY_MS);
+        await flushPromises();
+
+        assert.equal(http.mock.callCount(), 2);
+        assert.match(
+          http.mock.calls[1]?.arguments[0].url ?? '',
+          /192\.168\.2\.231/,
+          'the unplugged player must not block the one that answers',
+        );
+        assert.equal(subscribers[0]?.url, 'http://192.168.2.231:1400/ZoneGroupTopology/Event');
+      } finally {
+        mock.timers.reset();
+      }
     });
 
     it('retries the hosts after a failure with a delay', async () => {

@@ -101,6 +101,13 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
 - `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
   facts once the players are known; 503 while starting or shutting down.
+- Fixed: `discoveryHosts` now rotates through the list, one host per attempt. Every host was
+  asked at once, but the first `#init` to run claims the system and the rest return at its
+  guard, so only the first entry was ever really tried — a single unplugged player blocked the
+  whole list indefinitely.
+- Announcements are refused with the "no Sonos system has been discovered yet" 503 (and
+  `Retry-After: 5`) while no players are known, instead of a 400 claiming the preset's rooms are
+  unknown.
 - Fixed: an announcement whose clip was never heard playing (the player could not fetch it, or
   its events went missing) reported a clean `done`. The result now carries a warning saying the
   rooms may have been silent, so `done` means observed, not assumed.

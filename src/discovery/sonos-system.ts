@@ -121,6 +121,8 @@ export class SonosSystem
   #disposed = false;
   #initializing = false;
   #restartCount = 0;
+  /** Which configured host the next seeding attempt starts from. */
+  #seedIndex = 0;
   #seedTimer: NodeJS.Timeout | undefined;
   readonly #onFound = (found: SsdpFound): void => {
     void this.#init(found);
@@ -256,16 +258,18 @@ export class SonosSystem
 
     const seed = (): void => {
       this.#seedTimer = undefined;
-      for (const host of hosts) {
-        void this.#init(
-          {
-            ip: host,
-            location: `http://${host}:${PLAYER_PORT}/xml/device_description.xml`,
-            household: undefined,
-          },
-          true,
-        );
-      }
+      // One host per attempt, rotating. Whichever #init runs first claims the system and the
+      // rest return at its guard, so asking them all at once would only ever try the first —
+      // and a single unplugged player would block every other host on the list forever.
+      const host = hosts[this.#seedIndex++ % hosts.length] ?? '';
+      void this.#init(
+        {
+          ip: host,
+          location: `http://${host}:${PLAYER_PORT}/xml/device_description.xml`,
+          household: undefined,
+        },
+        true,
+      );
     };
 
     // The first attempt runs right away; later ones (after a failure) are spaced out.

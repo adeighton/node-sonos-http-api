@@ -371,6 +371,11 @@ Available `settings.json` options:
 * `household`: pick one Sonos household when a network has several (e.g. `Sonos_ab7d67898dcc5a6d`)
 * `discoveryHosts`: array of player IPs to contact directly when SSDP multicast cannot reach the
   players (for example from another subnet). Discovery still runs normally as well.
+  One reachable player is enough — it reports the whole household — so this is a list of seeds,
+  not a roster: name two or three players that are always powered rather than every speaker you
+  own. They are tried one per attempt, rotating, so a player that has been unplugged costs one
+  retry interval (5 s) and no more. Give those players a DHCP reservation, since the list is
+  addresses rather than names.
 * `webhook`, `webhookType`, `webhookData`, `webhookHeaderName`, `webhookHeaderContents`: see Webhook
 * `aws`: Polly settings, see Say
 * `spotify`: `{ "clientId": ..., "clientSecret": ... }` for music search
