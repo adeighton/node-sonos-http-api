@@ -267,7 +267,6 @@ describe('POST /tts', () => {
       durationMs: 1500,
       cached: false,
       synthMs: 0,
-      chunks: 1,
     });
     assert.deepEqual(spoken, [{ phrase: 'Warm me up', voice: 'Brian' }]);
     assert.equal((await post('/tts', {})).status, 400);

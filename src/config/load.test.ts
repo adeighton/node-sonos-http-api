@@ -49,9 +49,7 @@ describe('loadSettings', () => {
         credentials: { region: 'us-east-1' },
         name: 'Joanna',
         engine: 'neural',
-        maxConcurrency: 6,
         timeoutMs: 20_000,
-        chunkTargetChars: 800,
       });
       assert.deepEqual(loaded.unknownKeys, ['remove voicerss', 'remove auth']);
       assert.equal(loaded.settings.auth, undefined, 'renamed keys are not applied');
@@ -86,9 +84,7 @@ describe('loadSettings', () => {
         credentials: { region: 'eu-west-1' },
         voice: 'Matthew',
         engine: 'standard',
-        maxConcurrency: 6,
         timeoutMs: 20_000,
-        chunkTargetChars: 800,
       });
       assert.equal(loaded.settings.logLevel, 'debug');
       assert.deepEqual(loaded.settings.discoveryHosts, ['192.168.2.230', '192.168.2.231']);

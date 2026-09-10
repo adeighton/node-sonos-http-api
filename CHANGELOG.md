@@ -101,6 +101,18 @@ clip, restore, warnings, timings } }`. `restore: 'partial'` with a warning per r
 - `npm run smoke:announce` rings a doorbell into the middle of a briefing on a running server.
 - `GET /health` (no credentials): 200 with version, uptime, discovery, text-to-speech and queue
   facts once the players are known; 503 while starting or shutting down.
+- Fixed: a briefing-length text failed to synthesize with
+  `ERR_HTTP2_SESSION_ERROR: Session closed with error code 1` while short phrases never did.
+  Long text was being split into pieces and sent to Polly concurrently, multiplexed on one fresh
+  HTTP/2 session; Polly allows one stream per connection (`SETTINGS_MAX_CONCURRENT_STREAMS = 1`)
+  and answers the extra streams on a new connection — before its settings have arrived — with
+  `GOAWAY PROTOCOL_ERROR`, which took the whole session down. The splitting is gone: a phrase is
+  one `SynthesizeSpeech` request, which is also how Polly wants it (it shapes the prosody of the
+  whole text), and its limit — 3,000 billed characters, 6,000 with SSML — is now the only one,
+  enforced up front with a 400 naming the numbers. The chunker, the MP3 joiner, the concurrency
+  limiter and the `aws.maxConcurrency` / `aws.chunkTargetChars` settings were removed with it,
+  and `POST /tts` no longer reports `chunks`. A connection dropped while the audio is still being
+  read is retried like one dropped during the request.
 - Fixed: `discoveryHosts` now rotates through the list, one host per attempt. Every host was
   asked at once, but the first `#init` to run claims the system and the rest return at its
   guard, so only the first entry was ever really tried — a single unplugged player blocked the

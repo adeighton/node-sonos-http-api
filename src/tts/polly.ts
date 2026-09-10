@@ -21,11 +21,9 @@ import {
 } from '../http/errors.ts';
 import { silentLogger } from '../logger.ts';
 import type { Logger } from '../logger.ts';
-import { createLimiter } from '../util/parallel.ts';
 import type { ClipCache } from './cache.ts';
-import { chunkSpeech } from './chunk.ts';
-import { concatMp3 } from './mp3.ts';
 import { normalizeForSpeech } from './normalize.ts';
+import type { NormalizedSpeech } from './normalize.ts';
 import type { Clip, TtsProvider, TtsRequest } from './provider.ts';
 import type { VoiceCatalog } from './voices.ts';
 
@@ -70,12 +68,8 @@ export interface PollyClientOptions {
 export interface PollyProviderOptions {
   voice: string;
   engine: PollyEngine;
-  /** Chunks synthesized at once; default 6 (Polly allows 8 neural requests per second). */
-  maxConcurrency?: number;
-  /** Deadline for one chunk; default 20 s. */
+  /** Deadline for the synthesis request; default 20 s. */
   timeoutMs?: number;
-  /** Preferred chunk size in billed characters; default 800. */
-  chunkTargetChars?: number;
 }
 
 export interface PollyProviderDeps {
@@ -88,8 +82,26 @@ export interface PollyProviderDeps {
 
 export const DEFAULT_POLLY_VOICE = 'Joanna';
 export const DEFAULT_POLLY_REGION = 'us-east-1';
-const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_TIMEOUT_MS = 20_000;
+
+/**
+ * What one SynthesizeSpeech request may carry, from Polly's documentation and confirmed against
+ * the service on every engine: 3000 billed characters (the text), 6000 in all (SSML tags
+ * included). A phrase is always one request — Polly shapes the prosody of the whole text, so it
+ * is never split — and anything longer is refused with these numbers in the message.
+ */
+export const POLLY_MAX_BILLED_CHARS = 3000;
+export const POLLY_MAX_TOTAL_CHARS = 6000;
+
+function assertWithinLimits(speech: NormalizedSpeech): void {
+  if (speech.billedChars > POLLY_MAX_BILLED_CHARS || speech.body.length > POLLY_MAX_TOTAL_CHARS) {
+    throw new BadRequestError(
+      `Text is ${speech.billedChars} billed characters (${speech.body.length} with SSML); ` +
+        `Polly synthesizes at most ${POLLY_MAX_BILLED_CHARS} billed and ` +
+        `${POLLY_MAX_TOTAL_CHARS} in total in one request`,
+    );
+  }
+}
 
 const KNOWN_VOICES: ReadonlySet<string> = new Set(Object.values(VoiceId));
 
@@ -284,15 +296,11 @@ export function toHttpError(error: unknown): HttpError {
   return new BadGatewayError(`Polly failed: ${message}`, { cause: error });
 }
 
-/**
- * Text-to-speech through Amazon Polly, cached on disk. Long text is synthesized in paragraph
- * chunks in parallel and the MP3 frames are joined, so a briefing of any length is one clip.
- */
+/** Text-to-speech through Amazon Polly: one SynthesizeSpeech request per phrase, cached on disk. */
 export function createPollyProvider(
   options: PollyProviderOptions,
   deps: PollyProviderDeps,
 ): TtsProvider {
-  const limit = createLimiter(options.maxConcurrency ?? DEFAULT_CONCURRENCY);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const logger = deps.logger ?? silentLogger;
 
@@ -330,7 +338,7 @@ export function createPollyProvider(
     }
   }
 
-  async function synthesizeChunk(
+  async function synthesizeSpeech(
     text: string,
     voice: VoiceId,
     engine: PollyEngine,
@@ -338,11 +346,13 @@ export function createPollyProvider(
   ): Promise<Uint8Array> {
     const deadline = AbortSignal.timeout(timeoutMs);
     const abortSignal = signal ? AbortSignal.any([deadline, signal]) : deadline;
-    // A dropped connection is worth one retry: the failed attempt evicts the dead HTTP/2 session
-    // from the pool, so the second one dials again. Everything else is Polly's answer, not noise.
-    const response = await withTransientRetry(
-      () =>
-        deps.client.send(
+    // A dropped connection is worth one retry, and the body is inside it on purpose: HTTP/2
+    // answers as soon as the headers arrive, so a GOAWAY during the audio lands in the body read.
+    // The failed attempt evicts the dead session from the pool; the second one dials again.
+    // Everything else is Polly's answer, not noise.
+    return withTransientRetry(
+      async () => {
+        const response = await deps.client.send(
           new SynthesizeSpeechCommand({
             OutputFormat: 'mp3',
             SampleRate: sampleRateFor(engine),
@@ -352,18 +362,19 @@ export function createPollyProvider(
             Text: text,
           }),
           { abortSignal },
-        ),
+        );
+        if (!response.AudioStream) {
+          throw new BadGatewayError('Polly answered without audio');
+        }
+
+        return response.AudioStream.transformToByteArray();
+      },
       {
         label: 'SynthesizeSpeech',
         retryOn: (error) => connectionErrorCode(error) !== undefined,
         logger,
       },
     );
-    if (!response.AudioStream) {
-      throw new BadGatewayError('Polly answered without audio');
-    }
-
-    return response.AudioStream.transformToByteArray();
   }
 
   return {
@@ -374,24 +385,18 @@ export function createPollyProvider(
       await assertSupported(voice, engine);
 
       const speech = normalizeForSpeech(request.phrase);
-      const chunks = chunkSpeech(speech, { targetChars: options.chunkTargetChars });
+      assertWithinLimits(speech);
       const filename = pollyClipName(speech.body, voice, engine);
       const started = Date.now();
 
       const clip = await deps.cache.getOrCreate(filename, async (temporary) => {
-        const parts = await Promise.all(
-          chunks.map((chunk) => limit(() => synthesizeChunk(chunk, voice, engine, request.signal))),
+        await writeFile(
+          temporary,
+          await synthesizeSpeech(speech.body, voice, engine, request.signal),
         );
-        const joined = concatMp3(parts);
-        await writeFile(temporary, joined.bytes);
-        return joined.durationMs;
       });
 
-      return {
-        ...clip,
-        synthMs: clip.cached ? 0 : Date.now() - started,
-        chunks: chunks.length,
-      };
+      return { ...clip, synthMs: clip.cached ? 0 : Date.now() - started };
     },
   };
 }

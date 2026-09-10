@@ -493,8 +493,10 @@ with `<speak>` is sent as SSML, so you can add pauses, emphasis or spell things 
 	/Office/say/<speak>Dinner is ready<break time="500ms"/>come downstairs</speak>
 
 Generated clips are cached in `static/tts` and reused for identical phrase, voice and engine. A
-long phrase is split at paragraph and sentence boundaries, synthesized in parallel and joined into
-one clip, so a briefing of several thousand characters is fine (Polly alone stops at 3000).
+phrase is always sent to Polly as **one** request — Polly shapes the intonation of the whole text,
+so it is never split — and Polly's limit for one request is the only limit: 3,000 characters of
+text (6,000 in all once SSML tags are counted). Anything longer is refused with a 400 that says
+so; a daily briefing of a few paragraphs is well inside it.
 
 `sayall` groups every player, sets the announce volume (40% by default) and restores the previous
 grouping, volumes and playback afterwards. `saypreset` does the same on the players of a preset,
@@ -577,7 +579,7 @@ Otherwise the answer is `202 Accepted` with `Location: /announce/<id>` and
     DELETE /announce/<id>         cancel: a queued one is dropped, a playing one is stopped and its
                                   rooms restored (202; 409 once it is finished)
     POST /tts  { "text" | "ssml", "voice"?, "engine"? }
-                                  synthesize ahead of time; answers { uri, durationMs, cached, synthMs, chunks }
+                                  synthesize ahead of time; answers { uri, durationMs, cached, synthMs }
     GET /voices                   every Polly voice and the engines it supports, for a dropdown
 
 `GET /voices` answers `{ voices: [{ id, gender, language, languageName, engines }], engines }`,

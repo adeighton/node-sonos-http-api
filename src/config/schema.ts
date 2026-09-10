@@ -86,12 +86,8 @@ export const settingsSchema = z.object({
       name: z.string().optional(),
       voice: z.string().optional(),
       engine: z.enum(POLLY_ENGINES).default('neural'),
-      /** Chunks of one phrase synthesized at once; Polly allows 8 neural requests per second. */
-      maxConcurrency: z.coerce.number().int().min(1).max(8).default(6),
       /** Deadline for synthesizing one chunk. */
       timeoutMs: z.coerce.number().int().min(1000).default(20_000),
-      /** Preferred chunk size in billed characters (Polly accepts at most 3000 per request). */
-      chunkTargetChars: z.coerce.number().int().min(100).max(2500).default(800),
     })
     .optional(),
   spotify: z

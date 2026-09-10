@@ -337,10 +337,9 @@ describeLive('announcement API (live)', ({ it }) => {
     const text = `Pre-warm ${Date.now()}`;
     const miss = await post(harness, '/tts', { text });
     assert.equal(miss.status, 200, JSON.stringify(miss.body));
-    const first = miss.body as { uri: string; durationMs: number; cached: boolean; chunks: number };
+    const first = miss.body as { uri: string; durationMs: number; cached: boolean };
     assert.equal(first.cached, false);
     assert.ok(first.durationMs > 500);
-    assert.equal(first.chunks, 1);
 
     const hit = await post(harness, '/tts', { text });
     const second = hit.body as { uri: string; cached: boolean };

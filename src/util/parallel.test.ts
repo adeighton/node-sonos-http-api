@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createLimiter, mapLimit } from './parallel.ts';
+import { mapLimit } from './parallel.ts';
 
 /** A task that resolves when told to, recording how many run at once. */
 function gate() {
@@ -58,28 +58,5 @@ describe('mapLimit', () => {
     assert.deepEqual(await mapLimit([], 4, () => Promise.resolve(1)), []);
     const results = await mapLimit([1], 10, (n) => Promise.resolve(n));
     assert.equal(results.length, 1);
-  });
-});
-
-describe('createLimiter', () => {
-  it('lets at most `max` tasks run concurrently, first come first served', async () => {
-    const g = gate();
-    const limit = createLimiter(2);
-    const pending = [1, 2, 3].map((n) => limit(() => g.task(n)));
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(g.running(), 2);
-
-    await g.releaseAll();
-    assert.deepEqual(await Promise.all(pending), [2, 4, 6]);
-    assert.equal(g.peak(), 2);
-  });
-
-  it('releases the slot when a task throws', async () => {
-    const limit = createLimiter(1);
-    await assert.rejects(
-      limit(() => Promise.reject(new Error('boom'))),
-      /boom/,
-    );
-    assert.equal(await limit(() => Promise.resolve('next')), 'next');
   });
 });

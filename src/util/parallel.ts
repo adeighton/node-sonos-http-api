@@ -28,38 +28,3 @@ export async function mapLimit<T, R>(
   await Promise.all(Array.from({ length: workers }, () => worker()));
   return results;
 }
-
-export type Limiter = <T>(task: () => Promise<T>) => Promise<T>;
-
-/** A FIFO semaphore: `limit(task)` waits for a free slot, runs the task, then frees the slot. */
-export function createLimiter(max: number): Limiter {
-  let active = 0;
-  const waiting: Array<() => void> = [];
-
-  const acquire = (): Promise<void> =>
-    new Promise((resolve) => {
-      if (active < max) {
-        active += 1;
-        resolve();
-      } else {
-        waiting.push(() => {
-          active += 1;
-          resolve();
-        });
-      }
-    });
-
-  const release = (): void => {
-    active -= 1;
-    waiting.shift()?.();
-  };
-
-  return async (task) => {
-    await acquire();
-    try {
-      return await task();
-    } finally {
-      release();
-    }
-  };
-}

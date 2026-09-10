@@ -5,11 +5,11 @@ import { describeLive } from './boot.ts';
 
 const VOLUME = '15';
 
-/** Long enough to be split into more than one Polly request (chunk target 800 characters). */
+/** The shape of the daily briefing: several paragraphs, one Polly request. */
 const BRIEFING = [
-  'Good morning. This is the live text-to-speech test of the announcement pipeline. It reads a text',
-  'that is longer than one synthesis request, so the server has to split it at sentence boundaries,',
-  'synthesize the parts in parallel and join them into a single clip before playing it.',
+  'Good morning. This is the live text-to-speech test of the announcement pipeline. It reads a',
+  'multi-paragraph text that is sent to Polly whole, as one request, so the intonation carries',
+  'across the paragraphs the way it would if a person read them.',
   '',
   'Today the weather is whatever it is outside. The first meeting starts at nine, the second one at',
   'eleven, and lunch is at half past twelve. The dishwasher would like to be emptied, the plants',
@@ -64,9 +64,7 @@ describeLive('text-to-speech (live)', ({ it }) => {
     });
   });
 
-  it('reads a multi-paragraph briefing longer than one Polly request as a single clip', async ({
-    harness,
-  }, t) => {
+  it('reads a multi-paragraph briefing as one request and one clip', async ({ harness }, t) => {
     if (!ttsConfigured()) {
       t.skip('AWS credentials are not configured');
       return;
@@ -127,6 +125,19 @@ describeLive('text-to-speech (live)', ({ it }) => {
     assert.ok(preferred, `the configured voice ${configured} is in the catalog`);
     const engine = process.env.SONOS_POLLY_ENGINE ?? 'neural';
     assert.ok(preferred.engines.includes(engine), `${configured} supports ${engine}`);
+  });
+
+  it("refuses a text over Polly's limit with a 400 that names it", async ({ harness }, t) => {
+    if (!ttsConfigured()) {
+      t.skip('AWS credentials are not configured');
+      return;
+    }
+
+    const room = harness.rooms[0] ?? '';
+    const tooLong = 'This sentence is here to make the text too long for one request. '.repeat(48);
+    const response = await harness.action(room, 'say', tooLong, VOLUME);
+    assert.equal(response.status, 400, JSON.stringify(response.body));
+    assert.match(JSON.stringify(response.body), /at most 3000 billed/);
   });
 
   it('rejects an unknown voice before touching the speakers', async ({ harness }, t) => {

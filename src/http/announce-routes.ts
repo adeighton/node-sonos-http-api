@@ -177,7 +177,6 @@ export function createAnnounceRoutes(
       durationMs: clip.durationMs,
       cached: clip.cached ?? false,
       synthMs: clip.synthMs ?? 0,
-      chunks: clip.chunks ?? 1,
     });
   });
 

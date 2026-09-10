@@ -70,9 +70,7 @@ export function createTtsService(settings: Settings, deps: TtsServiceDeps = {}):
         {
           voice: settings.aws.voice ?? settings.aws.name ?? DEFAULT_POLLY_VOICE,
           engine: settings.aws.engine,
-          maxConcurrency: settings.aws.maxConcurrency,
           timeoutMs: settings.aws.timeoutMs,
-          chunkTargetChars: settings.aws.chunkTargetChars,
         },
         { cache, client, catalog, logger },
       ),

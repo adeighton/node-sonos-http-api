@@ -11,9 +11,10 @@ import { captureLogs } from '../testing/capture-logs.ts';
 import { fixturePath } from '../testing/fixtures.ts';
 import { withTempDir } from '../testing/with-temp-dir.ts';
 import { ClipCache } from './cache.ts';
+import { fileDurationMs } from './duration.ts';
 import { DurationIndex } from './duration-index.ts';
-import { concatMp3, parseMp3 } from './mp3.ts';
 import {
+  POLLY_MAX_BILLED_CHARS,
   connectionErrorCode,
   createPollyProvider,
   parseVoiceId,
@@ -25,10 +26,10 @@ import type { PollyClientLike, PollyCommand, PollySendOptions } from './polly.ts
 import { VoiceCatalog } from './voices.ts';
 
 interface FakeOptions {
-  /** Resolves each synthesis after this many ms (real timers), to observe concurrency. */
-  delayMs?: number;
   voices?: Array<{ Id: string; SupportedEngines: string[] }>;
   fail?: (command: SynthesizeSpeechCommand) => Error | undefined;
+  /** Fails while the audio is being read: the request went through, the body did not. */
+  failStream?: () => Error | undefined;
 }
 
 /** Node's error for an HTTP/2 session that was dropped while it sat in the SDK's pool. */
@@ -49,28 +50,29 @@ async function fakePolly(options: FakeOptions = {}) {
   const audio = await readFile(fixturePath('clip.mp3'));
   const inputs: SynthesizeSpeechCommand['input'][] = [];
   const signals: Array<AbortSignal | undefined> = [];
-  let inFlight = 0;
-  let peak = 0;
-  const send = mock.fn(async (command: PollyCommand, sendOptions?: PollySendOptions) => {
+  const send = mock.fn((command: PollyCommand, sendOptions?: PollySendOptions) => {
     if (command instanceof DescribeVoicesCommand) {
-      return { Voices: options.voices ?? [] };
+      return Promise.resolve({ Voices: options.voices ?? [] });
     }
 
     inputs.push(command.input);
     signals.push(sendOptions?.abortSignal);
     const failure = options.fail?.(command);
     if (failure) {
-      throw failure;
+      return Promise.reject(failure);
     }
 
-    inFlight += 1;
-    peak = Math.max(peak, inFlight);
-    await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 0));
-    inFlight -= 1;
-    return { AudioStream: { transformToByteArray: () => Promise.resolve(new Uint8Array(audio)) } };
+    return Promise.resolve({
+      AudioStream: {
+        transformToByteArray: () => {
+          const late = options.failStream?.();
+          return late ? Promise.reject(late) : Promise.resolve(new Uint8Array(audio));
+        },
+      },
+    });
   });
   const client: PollyClientLike = { send };
-  return { client, send, inputs, signals, peak: () => peak, audio };
+  return { client, send, inputs, signals, audio };
 }
 
 function cacheIn(dir: string) {
@@ -126,9 +128,10 @@ describe('polly provider', () => {
       ]);
       assert.ok(polly.signals[0] instanceof AbortSignal, 'every call carries an abort signal');
       assert.equal(clip.cached, false);
-      assert.equal(clip.chunks, 1);
-      assert.equal(clip.durationMs, concatMp3([polly.audio]).durationMs);
       assert.match(clip.uri, /^\/tts\/polly-[0-9a-f]{40}-Joanna-neural\.mp3$/);
+      const file = join(dir, decodeURIComponent(clip.uri.slice('/tts/'.length)));
+      assert.deepEqual(await readFile(file), polly.audio, "Polly's audio, byte for byte");
+      assert.equal(clip.durationMs, await fileDurationMs(fixturePath('clip.mp3')));
       assert.equal(again.cached, true);
       assert.equal(again.uri, clip.uri);
       assert.equal(polly.send.mock.callCount(), 1);
@@ -157,27 +160,59 @@ describe('polly provider', () => {
     });
   });
 
-  it('splits long text into chunks, synthesizes them concurrently and joins the audio', async () => {
+  it('sends a multi-paragraph briefing as one request, whole', async () => {
     await withTempDir(async (dir) => {
-      const polly = await fakePolly({ delayMs: 20 });
+      const polly = await fakePolly();
       const provider = createPollyProvider(
-        { voice: 'Joanna', engine: 'neural', maxConcurrency: 2, chunkTargetChars: 120 },
+        { voice: 'Joanna', engine: 'neural' },
         { cache: cacheIn(dir), client: polly.client },
       );
+      const sentence = 'The quick brown fox jumps over the lazy dog near the river bank today. ';
       const paragraphs = Array.from(
-        { length: 6 },
-        (_, i) => `Paragraph ${i} has some words in it, enough to matter.`,
+        { length: 8 },
+        (_, i) => `Paragraph ${i}. ${sentence.repeat(5)}`,
+      );
+      const phrase = paragraphs.join('\n\n');
+      assert.ok(
+        phrase.length > 2500 && phrase.length <= POLLY_MAX_BILLED_CHARS,
+        `${phrase.length}`,
       );
 
-      const clip = await provider.synthesize({ phrase: paragraphs.join('\n\n') });
+      await provider.synthesize({ phrase });
 
-      assert.ok(clip.chunks !== undefined && clip.chunks >= 3, `chunked: ${clip.chunks}`);
-      assert.equal(polly.send.mock.callCount(), clip.chunks);
-      assert.equal(polly.peak(), 2, 'never more than maxConcurrency in flight');
-      const expected = concatMp3(Array.from({ length: clip.chunks }, () => polly.audio));
-      assert.equal(clip.durationMs, expected.durationMs, 'the joined duration');
-      const file = join(dir, decodeURIComponent(clip.uri.slice('/tts/'.length)));
-      assert.equal(parseMp3(await readFile(file)).frames, expected.frames);
+      assert.equal(
+        polly.inputs.length,
+        1,
+        'never split: Polly shapes the prosody of the whole text',
+      );
+      const text = polly.inputs[0]?.Text ?? '';
+      assert.ok(text.startsWith('<speak><p>Paragraph 0.'));
+      assert.ok(text.includes('<p>Paragraph 7.'));
+    });
+  });
+
+  it("refuses text over Polly's limit before making any request", async () => {
+    await withTempDir(async (dir) => {
+      const polly = await fakePolly();
+      const provider = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: polly.client },
+      );
+
+      await assert.rejects(
+        provider.synthesize({ phrase: 'x'.repeat(POLLY_MAX_BILLED_CHARS + 1) }),
+        (error: unknown) =>
+          error instanceof BadRequestError &&
+          error.message ===
+            'Text is 3001 billed characters (3023 with SSML); Polly synthesizes at most 3000 billed and 6000 in total in one request',
+      );
+      // Tags are not billed but do count towards the total.
+      const padded = `<speak>${'<break time="1ms"/>'.repeat(320)}Hi</speak>`;
+      await assert.rejects(provider.synthesize({ phrase: padded }), /6000 in total/);
+      assert.equal(polly.inputs.length, 0, 'nothing was sent');
+      await assert.doesNotReject(
+        provider.synthesize({ phrase: 'x'.repeat(POLLY_MAX_BILLED_CHARS) }),
+      );
     });
   });
 
@@ -260,11 +295,26 @@ describe('polly provider', () => {
         { cache: cacheIn(dir), client: polly.client, logger: logs.logger },
       );
 
-      const clip = await provider.synthesize({ phrase: 'Dinner is ready' });
+      await provider.synthesize({ phrase: 'Dinner is ready' });
 
-      assert.equal(clip.chunks, 1);
       assert.equal(polly.inputs.length, 2, 'the first attempt died, the second dialled again');
       assert.ok(logs.messages().includes('command failed, retrying'));
+    });
+  });
+
+  it('retries when the connection is dropped while the audio is still being read', async () => {
+    await withTempDir(async (dir) => {
+      // HTTP/2 answers the request as soon as the headers arrive; a GOAWAY from AWS during the
+      // body lands in transformToByteArray, not in send(). It is the same dropped connection.
+      const polly = await fakePolly({ failStream: failFirst(1, sessionClosed()) });
+      const provider = createPollyProvider(
+        { voice: 'Joanna', engine: 'neural' },
+        { cache: cacheIn(dir), client: polly.client },
+      );
+
+      await provider.synthesize({ phrase: 'Dinner is ready' });
+
+      assert.equal(polly.inputs.length, 2, 'the request was made again, body and all');
     });
   });
 

@@ -7,8 +7,6 @@ export interface Clip {
   cached?: boolean;
   /** Time spent synthesizing, in milliseconds; 0 for a cached clip. */
   synthMs?: number;
-  /** How many pieces the text was synthesized in. */
-  chunks?: number;
 }
 
 export interface TtsRequest {
